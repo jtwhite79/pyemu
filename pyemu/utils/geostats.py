@@ -1000,7 +1000,7 @@ class OrdinaryKrige(object):
 
                 dfs.append(df)
                 if var_filename is not None:
-                    a = np.array([float(i) for i in df.err_var],dtype=np.float).reshape(x.shape)
+                    a = np.array([float(i[0]) for i in df.err_var],dtype=np.float).reshape(x.shape)
                     #a = df.err_var.values.reshape(x.shape)
                     na_idx = ~np.isnan(a)
                     arr[na_idx] = a[na_idx]
