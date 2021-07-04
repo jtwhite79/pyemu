@@ -1000,8 +1000,8 @@ class OrdinaryKrige(object):
 
                 dfs.append(df)
                 if var_filename is not None:
-                    a = np.array([float(str(i)) for i in df.err_var],dtype=np.float).reshape(x.shape)
-                    #a = df.err_var.values.reshape(x.shape)
+                    #a = np.array([float(str(i)) for i in df.err_var],dtype=np.float).reshape(x.shape)
+                    a = df.err_var.values.reshape(x.shape)
                     na_idx = ~np.isnan(a)
                     arr[na_idx] = a[na_idx]
             if self.interp_data is None or self.interp_data.dropna().shape[0] == 0:
@@ -1366,7 +1366,7 @@ class OrdinaryKrige(object):
             df["idist"] = idist
             df["inames"] = inames
             df["ifacts"] = ifacts
-            df["err_var"] = err_var
+            df["err_var"] = [float(e) for e in err_var]
         if pt_zone is None:
             self.interp_data = df
         else:
