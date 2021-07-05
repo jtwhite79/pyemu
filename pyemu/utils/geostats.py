@@ -1003,7 +1003,8 @@ class OrdinaryKrige(object):
                 if var_filename is not None:
                     #a = np.array([float(str(i)) for i in df.err_var],dtype=np.float).reshape(x.shape)
                     #a = df.err_var.values.reshape(x.shape)
-                    a = np.array([float("{0:15.6E}".format(ev)) if pd.notna(ev) else np.nan for ev in
+                    mp.managers.ListProxy
+                    a = np.array([float("{0:15.6E}".format(str(ev))) if pd.notna(ev) else np.nan for ev in
                                     df.err_var.values]).reshape(x.shape)
                     na_idx = ~np.isnan(a)
                     arr[na_idx] = a[na_idx]
