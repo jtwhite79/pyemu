@@ -961,7 +961,7 @@ class OrdinaryKrige(object):
 
             if var_filename is not None:
 
-                arr = np.array([float("{0:15.6E}".format(ev)) if pd.notna(ev) else np.nan for ev in df.err_var.values]).reshape(x.shape)
+                arr = df.err_var.values.reshape(x.shape)
                 np.savetxt(var_filename, arr, fmt="%15.6E")
 
         if zone_array is not None:
@@ -1003,9 +1003,7 @@ class OrdinaryKrige(object):
                 if var_filename is not None:
                     #a = np.array([float(str(i)) for i in df.err_var],dtype=np.float).reshape(x.shape)
                     #a = df.err_var.values.reshape(x.shape)
-                    mp.managers.ListProxy
-                    a = np.array([float(str(ev)) if pd.notna(ev) else np.nan for ev in
-                                    df.err_var.values]).reshape(x.shape)
+                    a = df.err_var.values.reshape(x.shape)
                     na_idx = ~np.isnan(a)
                     arr[na_idx] = a[na_idx]
             if self.interp_data is None or self.interp_data.dropna().shape[0] == 0:
@@ -1371,7 +1369,7 @@ class OrdinaryKrige(object):
             df["inames"] = inames
             df["ifacts"] = ifacts
 
-            df["err_var"] = err_var
+            df["err_var"] = [e for e in err_var]
         if pt_zone is None:
             self.interp_data = df
         else:
