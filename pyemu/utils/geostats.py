@@ -1497,13 +1497,13 @@ class OrdinaryKrige(object):
             # err_var.append(float(sill + facs[-1] - sum([f*c for f,c in zip(facs[:-1],interp_cov)])))
             err_var[idx] = [float(sill + facs[-1] - sum([f * c for f, c in zip(facs[:-1], interp_cov)]))]
             # inames.append(pt_names)
-            inames[idx] = pt_names
+            inames[idx] = list(pt_names)
 
             # idist.append(dist.values)
-            idist[idx] = dist.values
+            idist[idx] = list(dist.values)
 
             # ifacts.append(facs[:-1,0])
-            ifacts[idx] = facs[:-1, 0]
+            ifacts[idx] = list(facs[:-1, 0])
             # if verbose == 2:
             #     td = (datetime.now()-start).total_seconds()
             #     print("...took {0}".format(td))
