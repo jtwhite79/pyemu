@@ -1365,9 +1365,9 @@ class OrdinaryKrige(object):
             for p in procs:
                 p.join()
 
-            df["idist"] = idist
-            df["inames"] = inames
-            df["ifacts"] = ifacts
+            df["idist"] = [i[0] for i in idist]
+            df["inames"] = [i[0] for i in inames]
+            df["ifacts"] = [i[0] for i in ifacts]
 
             df["err_var"] = [e[0] for e in err_var]
         if pt_zone is None:
@@ -1429,6 +1429,10 @@ class OrdinaryKrige(object):
                 # ifacts.append([])
                 # err_var.append(np.NaN)
                 # err_var.insert(idx,np.NaN)
+                ifacts[idx] = [[]]
+                idist[idx] = [[]]
+                inames[idx] = [[]]
+                err_var[idx] = [np.NaN]
                 continue
 
             #  calc dist from this interp point to all point data...slow
@@ -1442,6 +1446,9 @@ class OrdinaryKrige(object):
                 # idist.append([])
                 # ifacts.append([])
                 # err_var.append(sill)
+                ifacts[idx] = [[]]
+                idist[idx] = [[]]
+                inames[idx] = [[]]
                 err_var[idx] = [sill]
                 continue
 
@@ -1451,13 +1458,13 @@ class OrdinaryKrige(object):
             # if one of the points is super close, just use it and skip
             if dist.min() <= epsilon:
                 # ifacts.append([1.0])
-                ifacts[idx] = [1.0]
+                ifacts[idx] = [[1.0]]
                 # idist.append([epsilon])
-                idist[idx] = [epsilon]
+                idist[idx] = [[epsilon]]
                 # inames.append([dist.idxmin()])
-                inames[idx] = [dist.idxmin()]
+                inames[idx] = [[dist.idxmin()]]
                 # err_var.append(geostruct.nugget)
-                err_var[idx] = [geostruct.nugget]
+                err_var[idx] = [[geostruct.nugget]]
                 continue
 
             # vextract the point-to-point covariance matrix
@@ -1497,13 +1504,13 @@ class OrdinaryKrige(object):
             # err_var.append(float(sill + facs[-1] - sum([f*c for f,c in zip(facs[:-1],interp_cov)])))
             err_var[idx] = [float(sill + facs[-1] - sum([f * c for f, c in zip(facs[:-1], interp_cov)]))]
             # inames.append(pt_names)
-            inames[idx] = list(pt_names)
+            inames[idx] = [list(pt_names)]
 
             # idist.append(dist.values)
-            idist[idx] = list(dist.values)
+            idist[idx] = [list(dist.values)]
 
             # ifacts.append(facs[:-1,0])
-            ifacts[idx] = list(facs[:-1, 0])
+            ifacts[idx] = [list(facs[:-1, 0])]
             # if verbose == 2:
             #     td = (datetime.now()-start).total_seconds()
             #     print("...took {0}".format(td))
