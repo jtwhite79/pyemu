@@ -1004,7 +1004,7 @@ class OrdinaryKrige(object):
                     #a = np.array([float(str(i)) for i in df.err_var],dtype=np.float).reshape(x.shape)
                     #a = df.err_var.values.reshape(x.shape)
                     mp.managers.ListProxy
-                    a = np.array([float("{0:15.6E}".format(str(ev))) if pd.notna(ev) else np.nan for ev in
+                    a = np.array([float(str(ev)) if pd.notna(ev) else np.nan for ev in
                                     df.err_var.values]).reshape(x.shape)
                     na_idx = ~np.isnan(a)
                     arr[na_idx] = a[na_idx]
