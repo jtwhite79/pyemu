@@ -1369,7 +1369,7 @@ class OrdinaryKrige(object):
             df["inames"] = [i[0] for i in inames]
             df["ifacts"] = [i[0] for i in ifacts]
 
-            df["err_var"] = [e[0] for e in err_var]
+            df["err_var"] = [float(e[0]) for e in err_var]
         if pt_zone is None:
             self.interp_data = df
         else:
