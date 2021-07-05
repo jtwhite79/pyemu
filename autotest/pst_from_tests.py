@@ -3460,7 +3460,7 @@ if __name__ == "__main__":
     #mf6_freyberg_varying_idomain()
     #xsec_test()
     #mf6_freyberg_short_direct_test()
-    #mf6_add_various_obs_test()
+    mf6_add_various_obs_test()
     # mf6_subdir_test()
     #tpf = TestPstFrom()
     #tpf.setup()
@@ -3468,7 +3468,7 @@ if __name__ == "__main__":
     #tpf.add
     #pstfrom_profile()
     #mf6_freyberg_arr_obs_and_headerless_test()
-    usg_freyberg_test()
+    #usg_freyberg_test()
 
 
 
