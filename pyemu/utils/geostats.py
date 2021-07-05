@@ -1335,7 +1335,7 @@ class OrdinaryKrige(object):
                 idist.append([])
                 inames.append([])
                 ifacts.append([])
-                err_var.append(np.NaN)
+                err_var.append([np.NaN])
             lock = mp.Lock()
             procs = []
             for i in range(num_threads):
@@ -1369,7 +1369,7 @@ class OrdinaryKrige(object):
             df["inames"] = inames
             df["ifacts"] = ifacts
 
-            df["err_var"] = [e for e in err_var]
+            df["err_var"] = [e[0] for e in err_var]
         if pt_zone is None:
             self.interp_data = df
         else:
@@ -1442,7 +1442,7 @@ class OrdinaryKrige(object):
                 # idist.append([])
                 # ifacts.append([])
                 # err_var.append(sill)
-                err_var[idx] = sill
+                err_var[idx] = [sill]
                 continue
 
             # only the maxpts_interp points
@@ -1457,7 +1457,7 @@ class OrdinaryKrige(object):
                 # inames.append([dist.idxmin()])
                 inames[idx] = [dist.idxmin()]
                 # err_var.append(geostruct.nugget)
-                err_var[idx] = geostruct.nugget
+                err_var[idx] = [geostruct.nugget]
                 continue
 
             # vextract the point-to-point covariance matrix
@@ -1495,9 +1495,7 @@ class OrdinaryKrige(object):
             assert len(facs) - 1 == len(dist)
 
             # err_var.append(float(sill + facs[-1] - sum([f*c for f,c in zip(facs[:-1],interp_cov)])))
-            err_var[idx] = float(
-                sill + facs[-1] - sum([f * c for f, c in zip(facs[:-1], interp_cov)])
-            )
+            err_var[idx] = [float(sill + facs[-1] - sum([f * c for f, c in zip(facs[:-1], interp_cov)]))]
             # inames.append(pt_names)
             inames[idx] = pt_names
 
