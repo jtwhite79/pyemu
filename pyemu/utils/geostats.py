@@ -1366,9 +1366,7 @@ class OrdinaryKrige(object):
             df["idist"] = idist
             df["inames"] = inames
             df["ifacts"] = ifacts
-            t = []
-            for i in range(len(err_var)):
-                t.append(err_var[i])
+            t = list(err_var)
             df["err_var"] = t
         if pt_zone is None:
             self.interp_data = df
