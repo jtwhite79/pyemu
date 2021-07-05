@@ -3025,7 +3025,7 @@ def usg_freyberg_test():
         assert d.sum() < 1.0e-3,arr_file
 
     # now run a random realization from the prior par en and make sure things have changed
-    pst.parameter_data.loc[pe.columns,"parval1"] = pe.iloc[0,:]
+    pst.parameter_data.loc[pe.columns,"parval1"] = pe.iloc[0,:].values
     pst.write(os.path.join(pf.new_d, "freyberg.usg.pst"), version=2)
     pyemu.os_utils.run("{0} freyberg.usg.pst".format(ies_exe_path), cwd=pf.new_d)
 
@@ -3460,7 +3460,7 @@ if __name__ == "__main__":
     #mf6_freyberg_varying_idomain()
     #xsec_test()
     #mf6_freyberg_short_direct_test()
-    mf6_add_various_obs_test()
+   # mf6_add_various_obs_test()
     # mf6_subdir_test()
     #tpf = TestPstFrom()
     #tpf.setup()
@@ -3468,7 +3468,7 @@ if __name__ == "__main__":
     #tpf.add
     #pstfrom_profile()
     #mf6_freyberg_arr_obs_and_headerless_test()
-    #usg_freyberg_test()
+    usg_freyberg_test()
 
 
 
