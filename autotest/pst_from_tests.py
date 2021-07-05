@@ -2951,7 +2951,7 @@ def usg_freyberg_test():
                       upper_bound=2.0, lower_bound=0.5, zone_array=zone_array_k2)
 
     # we pass layer specific sr dict for each "array" type that is spatially distributed
-    pf.add_parameters("hk_Layer_1.ref",par_type="grid",par_name_base="hk1_gr",geostruct=gs,
+    pf.add_parameters("hk_Layer_1.ref",par_type="grid",par_name_base="hk1_Gr",geostruct=gs,
                       spatial_reference=sr_dict_by_layer[1],
                       upper_bound=2.0,lower_bound=0.5)
     pf.add_parameters("sy_Layer_1.ref", par_type="zone", par_name_base="sy1_zn",zone_array=zone_array_k0,

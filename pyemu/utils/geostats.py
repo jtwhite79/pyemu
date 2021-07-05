@@ -960,7 +960,8 @@ class OrdinaryKrige(object):
             )
 
             if var_filename is not None:
-                arr = df.err_var.values.reshape(x.shape)
+
+                arr = np.array([float("{0:15.6E}".format(ev)) if pd.notna(ev) else np.nan for ev in df.err_var.values]).reshape(x.shape)
                 np.savetxt(var_filename, arr, fmt="%15.6E")
 
         if zone_array is not None:
@@ -1366,8 +1367,8 @@ class OrdinaryKrige(object):
             df["idist"] = idist
             df["inames"] = inames
             df["ifacts"] = ifacts
-            t = list(err_var)
-            df["err_var"] = t
+
+            df["err_var"] = err_var
         if pt_zone is None:
             self.interp_data = df
         else:
