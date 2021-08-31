@@ -1733,7 +1733,7 @@ class InstructionFile(object):
                 raise Exception(
                     "instruction file '{0}' not found".format(self._ins_filename)
                 )
-            self._ins_filehandle = open(self._ins_filename, "r")
+            self._ins_filehandle = open(self._ins_filename, "r",encoding="utf8")
         line = self._ins_filehandle.readline()
         self._ins_linecount += 1
         if line == "":
@@ -1776,7 +1776,7 @@ class InstructionFile(object):
                 raise Exception(
                     "output file '{0}' not found".format(self._out_filename)
                 )
-            self._out_filehandle = open(self._out_filename, "r")
+            self._out_filehandle = open(self._out_filename, "r",encoding="utf8")
         line = self._out_filehandle.readline()
         self._out_linecount += 1
         if line == "":
