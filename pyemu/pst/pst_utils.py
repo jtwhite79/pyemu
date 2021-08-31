@@ -388,7 +388,7 @@ def parse_tpl_file(tpl_file):
 
     """
     par_names = set()
-    with open(tpl_file, "r") as f:
+    with open(tpl_file, "r",encoding="utf8") as f:
         try:
             header = f.readline().strip().split()
             assert header[0].lower() in [
@@ -776,8 +776,8 @@ def _read_infile_with_tplfile(tpl_file, input_file):
     if not os.path.exists(input_file):
         raise Exception("input file '{0}' not found".format(input_file))
 
-    f_tpl = open(tpl_file, "r")
-    f_in = open(input_file, "r")
+    f_tpl = open(tpl_file, "r",encoding="utf8")
+    f_in = open(input_file, "r",encoding="utf8")
 
     # read the tpl header
     _, marker = f_tpl.readline().split()
