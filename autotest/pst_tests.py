@@ -1274,7 +1274,7 @@ if __name__ == "__main__":
     # write2_nan_test()
     #process_output_files_test()
     # change_limit_test()
-    new_format_test()
+    #new_format_test()
     # lt_gt_constraint_names_test()
     #csv_to_ins_test()
     #ctrl_data_test()
@@ -1297,7 +1297,7 @@ if __name__ == "__main__":
     # tied_test()
 
     #pst_manip_test()
-    #tpl_ins_test()
+    tpl_ins_test()
     #comments_test()
     #test_e_clean()
     # load_test()

@@ -902,8 +902,6 @@ def try_process_output_pst(pst):
     """
     for ins_file, out_file in zip(pst.instruction_files, pst.output_files):
         df = None
-        i = InstructionFile(ins_file, pst=pst)
-        df = i.read_output_file(out_file)
         try:
             i = InstructionFile(ins_file, pst=pst)
             df = i.read_output_file(out_file)
