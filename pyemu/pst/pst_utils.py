@@ -1461,7 +1461,7 @@ class InstructionFile(object):
                         break
                 # copy a version of line commas replaced
                 # (to support comma sep strings)
-                rline = line.replace(",", " ")
+                rline = line.replace(",", " ").replace("\t"," ")
                 cursor_pos = line.index(mstr) + len(mstr)
 
             # line advance
@@ -1498,8 +1498,7 @@ class InstructionFile(object):
                         )
                     )
                 # step over current value
-                #cursor_pos = rline.find(" ", cursor_pos)
-                cursor_pos = re.search("[\\s]",rline[cursor_pos:]).regs[0][0]
+                cursor_pos = rline.find(" ", cursor_pos)
                 # now find position of next entry
                 cursor_pos = rline.find(raw[1], cursor_pos)
                 # raw[1]
