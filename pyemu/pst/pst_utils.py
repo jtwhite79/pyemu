@@ -4,6 +4,7 @@ import os
 import warnings
 import multiprocessing as mp
 import re
+import string
 import numpy as np
 import pandas as pd
 
@@ -901,6 +902,8 @@ def try_process_output_pst(pst):
     """
     for ins_file, out_file in zip(pst.instruction_files, pst.output_files):
         df = None
+        i = InstructionFile(ins_file, pst=pst)
+        df = i.read_output_file(out_file)
         try:
             i = InstructionFile(ins_file, pst=pst)
             df = i.read_output_file(out_file)
@@ -1497,7 +1500,8 @@ class InstructionFile(object):
                         )
                     )
                 # step over current value
-                cursor_pos = rline.find(" ", cursor_pos)
+                #cursor_pos = rline.find(" ", cursor_pos)
+                cursor_pos = re.search("[\\s]",rline[cursor_pos:]).regs[0][0]
                 # now find position of next entry
                 cursor_pos = rline.find(raw[1], cursor_pos)
                 # raw[1]
