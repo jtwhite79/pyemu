@@ -1237,8 +1237,7 @@ def pst_ctl_opt_args_test(tmp_path):
     pst.write(os.path.join(tmp_path, "test3.pst"))
 
     lines = open(os.path.join(tmp_path, "test3.pst"),'r').readlines()
-    assert lines[3].strip()[-1] == "1"
-
+    assert lines[4].strip()[-1] == "1"
 
     pst = pyemu.Pst(os.path.join("pst","pestpp_old.pst"))
     for i in range(10):
@@ -1254,6 +1253,28 @@ def pst_ctl_opt_args_test(tmp_path):
     pst3 = pyemu.Pst(os.path.join(tmp_path, "test2.pst"))
     #print(pst3.control_data.numcom)
     assert pst.control_data.numcom != pst3.control_data.numcom
+
+    pst = pyemu.Pst(os.path.join("pst", "pestpp_old.pst"))
+    for i in range(5):
+        pst.model_command.append("test{0}".format(i))
+    pst.control_data.numcom = 3
+    pst.write(os.path.join(tmp_path, "test.pst"))
+
+    lines = open(os.path.join(tmp_path, "test.pst"),'r').readlines()
+    print(lines[4])
+    assert int(lines[4].strip().split()[4]) == len(pst.model_command)
+
+    pst = pyemu.Pst(os.path.join("pst", "pestpp_old.pst"))
+    for i in range(5):
+        pst.model_command.append("test{0}".format(i))
+    pst.control_data.numcom = 3
+    pst.write(os.path.join(tmp_path, "test.pst"),version=2)
+
+    lines = open(os.path.join(tmp_path, "test.pst"), 'r').readlines()
+    for line in lines:
+        if "numcom" in line.lower():
+            raise Exception("busted...")
+
 
 
 def invest():
@@ -1476,7 +1497,7 @@ if __name__ == "__main__":
     with this.
     """
     d = 'temp'
-    interface_check_test()
+    #interface_check_test()
     # new_format_test_2()
     #write2_nan_test()
     #process_output_files_test()
@@ -1510,7 +1531,7 @@ if __name__ == "__main__":
     #load_test()
     #res_test()
     #
-    from_io_with_inschek_test(d)
+    #from_io_with_inschek_test(d)
     #pestpp_args_test()
     #reweight_test()
     #reweight_res_test()
@@ -1537,5 +1558,5 @@ if __name__ == "__main__":
     #rename_obs_test()
     #pst_ctl_opt_args_test()
     #invest()
-    # pst_ctl_opt_args_test()
+    pst_ctl_opt_args_test(d)
 

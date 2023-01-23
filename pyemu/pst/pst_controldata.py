@@ -504,13 +504,15 @@ class ControlData(object):
             f.write("pcf\n")
             f.write("* control data\n")
         for line in CONTROL_VARIABLE_LINES:
-            [
-                f.write(self.formatted_values[name.replace("[", "").replace("]", "")])
-                for name in line.split()
-                if self._df.loc[name.replace("[", "").replace("]", ""), "passed"]
-                == True
-                or self._df.loc[name.replace("[", "").replace("]", ""), "required"]
-                == True
-                or name.replace("[", "").replace("]", "") in self.keyword_accessed
-            ]
+            names = line.strip().split()
+            clean_names = [name.replace("[", "").replace("]", "") for name in names]
+            fvalues = self.formatted_values
+            for name,clean_name in zip(names,clean_names):
+                if self._df.loc[clean_name, "passed"] == True:
+                    f.write(fvalues.loc[clean_name])
+                elif self._df.loc[clean_name, "required"] == True:
+                    f.write(fvalues.loc[clean_name])
+                elif clean_name in self.keyword_accessed:
+                    f.write(fvalues.loc[clean_name])
+            
             f.write("\n")

@@ -1315,6 +1315,10 @@ class Pst(object):
         self.control_data.ntplfle = self.model_input_data.shape[0]
         # self.control_data.ninsfle = len(self.instruction_files)
         self.control_data.ninsfle = self.model_output_data.shape[0]
+        if "numcom" in self.control_data.keyword_accessed:
+            if self.control_data.numcom != len(self.model_command):
+                warnings.warn("user-supplied `numcom` != number of model commands, resetting to {0}".format(len(self.model_command)),PyemuWarning)
+
         self.control_data.numcom = len(self.model_command)
 
     def rectify_pgroups(self):
@@ -1906,7 +1910,7 @@ class Pst(object):
         # for line in self.other_lines:
         #     f_out.write(line)
         if self.with_comments:
-            for line in self.comments.get("* singular value decompisition", []):
+            for line in self.comments.get("* singular value decomposition", []):
                 f_out.write(line)
         self.svd_data.write(f_out)
 
