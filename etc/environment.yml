@@ -21,3 +21,6 @@ dependencies:
   - pyproj
   - flopy
   - modflow-devtools
+  - pip
+  pip:
+    - pypestutils
