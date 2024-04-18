@@ -5149,7 +5149,7 @@ def mf6_freyberg_thresh_test(tmp_path):
         pst.write(os.path.join(pf.new_d, "freyberg.pst"),version=2)
         pyemu.os_utils.run("{0} freyberg.pst".format(ies_exe_path), cwd=pf.new_d)
         pst = pyemu.Pst(os.path.join(pf.new_d,"freyberg.pst"))
-        assert pst.phi < 0.01,str(pst.phi)
+        assert np.isclose(pst.phi,0.0)
 
         # reset away from the truth...
         pst.parameter_data.loc[:,"parval1"] = org_par.parval1.values.copy()

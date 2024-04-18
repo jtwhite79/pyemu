@@ -2465,7 +2465,7 @@ def thresh_pars_test():
     inact_arr = np.ones_like(arr,dtype=int)
     inact_arr[:50,:] = 0
     orgarr_file = os.path.join(test_d,"org_arr.dat")
-    np.savetxt(orgarr_file,arr,fmt="%15.6E")
+    np.savetxt(orgarr_file,arr,fmt="%20.10E")
     p1 = np.percentile(arr,5)
     p2 = np.percentile(arr,95)
     cat_dict = {1:[0.4,p1],2:[0.6,p2]}
@@ -2485,13 +2485,13 @@ def thresh_pars_test():
     tot = inact_arr.sum()
     prop = np.nansum(tarr) / tot
     print(prop,cat_dict[1])
-    assert np.isclose(prop,cat_dict[1][0],0.01)
+    assert np.isclose(prop,cat_dict[1][0])
 
     tarr = np.zeros_like(newarr)
     tarr[np.isclose(newarr, cat_dict[2][1])] = 1.0
     prop = tarr.sum() / tot
     print(prop, cat_dict[2])
-    assert np.isclose(prop, cat_dict[2][0],0.01)
+    assert np.isclose(prop, cat_dict[2][0])
 
     # import matplotlib.pyplot as plt
     # fig,axes = plt.subplots(1,2,figsize=(10,5))
@@ -2508,7 +2508,7 @@ def thresh_pars_test():
 
 
 if __name__ == "__main__":
-    # thresh_pars_test()
+    thresh_pars_test()
     #obs_ensemble_quantile_test()
     #geostat_draws_test("temp")
     # ac_draw_test("temp")
@@ -2590,4 +2590,4 @@ if __name__ == "__main__":
     # ok_grid_zone_test()
     #maha_pdc_summary_test("temp")
     # gsf_reader_test()
-    kl_test()
+    #kl_test()

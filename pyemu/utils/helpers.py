@@ -3705,7 +3705,7 @@ def setup_threshold_pars(orgarr_file,cat_dict,testing_workspace=".",inact_arr=No
     thresharr = org_arr.copy()
     thresharr = thresharr / thresharr.max()
     thresharr_file = orgarr_file+".thresharr.dat"
-    np.savetxt(thresharr_file,thresharr,fmt="%15.6E")
+    np.savetxt(thresharr_file,thresharr,fmt="%20.10E")
 
     if inact_arr is not None:
         assert inact_arr.shape == org_arr.shape
@@ -3777,8 +3777,8 @@ def apply_threshold_pars(csv_file):
         df.loc[tcat[1], "proportion"] = 0
 
         df.to_csv(csv_file.replace(".csv", "_results.csv"))
-        np.savetxt(orgarr_file, farr, fmt="%15.6E")
-        np.savetxt(tarr_file, tarr, fmt="%15.6E")
+        np.savetxt(orgarr_file, farr, fmt="%20.10E")
+        np.savetxt(tarr_file, tarr, fmt="%20.10E")
         return tarr.mean(), 1.0
 
         #    print("WARNING: thresholding array {0} has very low standard deviation, adding noise".format(thresarr_file))
@@ -3844,8 +3844,8 @@ def apply_threshold_pars(csv_file):
     df.loc[tcat[0], "proportion"] = prop
     df.loc[tcat[1], "proportion"] = 1.0 - prop
     df.to_csv(csv_file.replace(".csv","_results.csv"))
-    np.savetxt(orgarr_file,farr,fmt="%15.6E")
-    np.savetxt(tarr_file, tarr, fmt="%15.6E")
+    np.savetxt(orgarr_file,farr,fmt="%20.10E")
+    np.savetxt(tarr_file, tarr, fmt="%20.10E")
 
     return thresh, prop
 
