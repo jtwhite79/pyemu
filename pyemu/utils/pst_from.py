@@ -281,6 +281,12 @@ class PstFrom(object):
         self.ult_lbound_fill = -1.0e30
         self.chunk_len = int(chunk_len)
         self.py_functions = set()
+        self.pre_py_cmds.append(
+                        "pyemu.helpers.apply_list_and_array_pars("
+                        "arr_par_file='mult2model_info.csv',chunk_len={0})".format(
+                            self.chunk_len)
+                        )
+
 
 
     @property
@@ -754,6 +760,11 @@ class PstFrom(object):
                 par_data = pyemu.pst_utils._populate_dataframe(
                     [], pst.par_fieldnames, pst.par_defaults, pst.par_dtype
                 )
+                t = []
+                for cmd in self.pre_py_cmds:
+                    if not "apply_list_and_array_pars" in cmd:
+                        t.append(cmd)
+                self.pre_py_cmds = t
             # set parameter data
             # some pre conditioning to support rentry here is more add_par
             # calls are made with update/rebuild pst
