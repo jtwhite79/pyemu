@@ -5400,7 +5400,7 @@ if __name__ == "__main__":
     #mf6_freyberg_shortnames_test()
     #mf6_freyberg_direct_test()
 
-    #mf6_freyberg_thresh_test(".")
+    mf6_freyberg_thresh_test(".")
 
     #plot_thresh("master_thresh")
     #plot_thresh("master_thresh_mm")
@@ -5418,7 +5418,7 @@ if __name__ == "__main__":
     # tpf.test_add_list_parameters()
     # # pstfrom_profile()
     # mf6_freyberg_arr_obs_and_headerless_test()
-    usg_freyberg_test(".")
+    #usg_freyberg_test(".")
     #vertex_grid_test()
     #direct_quickfull_test()
     #list_float_int_index_test()

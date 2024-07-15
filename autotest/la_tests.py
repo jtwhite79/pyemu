@@ -618,7 +618,7 @@ def ends_freyberg_dsi_test(tmp_path):
     pst.pestpp_options["predictions"] = predictions
 
     oe_name = pst_name.replace(".pst", ".0.obs.csv")
-    oe = pyemu.ObservationEnsemble.from_csv(pst=pst, filename=oe_name).iloc[:100, :]
+    oe = pyemu.ObservationEnsemble.from_csv(pst=pst, filename=oe_name).iloc[:30, :]
 
     
 
@@ -631,25 +631,25 @@ def ends_freyberg_dsi_test(tmp_path):
     pst.write(os.path.join(t_d,"dsi.pst"),version=2)
     #pyemu.os_utils.run("pestpp-ies dsi.pst",cwd="dsi_template")
     m_d = os.path.join(tmp_path,"master_dsi")
-    pyemu.os_utils.start_workers(t_d,"pestpp-ies","dsi.pst",num_workers=15,worker_root=tmp_path,
-                                 master_dir=m_d)
+    # pyemu.os_utils.start_workers(t_d,"pestpp-ies","dsi.pst",num_workers=15,worker_root=tmp_path,
+    #                              master_dir=m_d)
 
-    # run test wtih truncated svd
-    ends.prep_for_dsi(t_d=t_d,truncated_svd=True)
-    pst = pyemu.Pst(os.path.join(t_d,"dsi.pst"))
-    pst.control_data.noptmax = 3
-    pst.write(os.path.join(t_d,"dsi.pst"),version=2)
-    pyemu.os_utils.start_workers(t_d,"pestpp-ies","dsi.pst",num_workers=15,worker_root=tmp_path,
-                                 master_dir=m_d)
+    # # run test wtih truncated svd
+    # ends.prep_for_dsi(t_d=t_d,truncated_svd=True)
+    # pst = pyemu.Pst(os.path.join(t_d,"dsi.pst"))
+    # pst.control_data.noptmax = 3
+    # pst.write(os.path.join(t_d,"dsi.pst"),version=2)
+    # pyemu.os_utils.start_workers(t_d,"pestpp-ies","dsi.pst",num_workers=15,worker_root=tmp_path,
+    #                              master_dir=m_d)
 
 
-    # run test wtih normal score transform
-    ends.prep_for_dsi(t_d=t_d,apply_normal_score_transform=True)
-    pst = pyemu.Pst(os.path.join(t_d,"dsi.pst"))
-    pst.control_data.noptmax = 3
-    pst.write(os.path.join(t_d,"dsi.pst"),version=2)
-    pyemu.os_utils.start_workers(t_d,"pestpp-ies","dsi.pst",num_workers=15,worker_root=tmp_path,
-                                 master_dir=m_d)
+    # # run test wtih normal score transform
+    # ends.prep_for_dsi(t_d=t_d,apply_normal_score_transform=True)
+    # pst = pyemu.Pst(os.path.join(t_d,"dsi.pst"))
+    # pst.control_data.noptmax = 3
+    # pst.write(os.path.join(t_d,"dsi.pst"),version=2)
+    # pyemu.os_utils.start_workers(t_d,"pestpp-ies","dsi.pst",num_workers=15,worker_root=tmp_path,
+    #                              master_dir=m_d)
     
     # run test with log-transform
     pst = pyemu.Pst(pst_name)
@@ -660,9 +660,20 @@ def ends_freyberg_dsi_test(tmp_path):
     pst = pyemu.Pst(os.path.join(t_d,"dsi.pst"))
     pst.control_data.noptmax = 3
     pst.write(os.path.join(t_d,"dsi.pst"),version=2)
-    pyemu.os_utils.start_workers(t_d,"pestpp-ies","dsi.pst",num_workers=15,worker_root=tmp_path,
-                                 master_dir=m_d)
-
+    try:
+        pyemu.os_utils.start_workers(t_d,"pestpp-ies","dsi.pst",num_workers=15,worker_root=tmp_path,
+                                  master_dir=m_d)
+    except Exception as e:
+        import warnings
+        with open(os.path.join(m_d,"dsi.rec"),'r') as f:
+            for line in f:
+                warnings.warn(f.readline().strip(),DeprecationWarning)
+   
+        raise Exception(e)
+    import warnings
+    with open(os.path.join(m_d,"dsi.rec"),'r') as f:
+        for line in f:
+            warnings.warn(f.readline().strip(),DeprecationWarning)
 
 def plot_freyberg_dsi():
     import pandas as pd
@@ -736,9 +747,9 @@ def dsi_normscoretransform_test():
         assert max(abs(diff))<1e-7, backtransformed_values
 
 if __name__ == "__main__":
-    dsi_normscoretransform_test()
+    #dsi_normscoretransform_test()
     #ends_freyberg_dev()
-    #ends_freyberg_dsi_test("temp")
+    ends_freyberg_dsi_test("temp")
     #plot_freyberg_dsi()
     #obscomp_test()
     #alternative_dw()
