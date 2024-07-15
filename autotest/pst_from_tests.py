@@ -5122,6 +5122,9 @@ def mf6_freyberg_thresh_test(tmp_path):
         with open(os.path.join(m_d,"freyberg.rec"),'r') as f:
             for line in f:
                 warnings.warn(f.readline().strip(),DeprecationWarning)
+        with open(os.path.join(m_d,"freyberg.log"),'r') as f:
+            for line in f:
+                warnings.warn(f.readline().strip(),DeprecationWarning)
    
         os.chdir(bd)
         raise Exception(e)
