@@ -630,12 +630,13 @@ def ends_freyberg_dsi_test(tmp_path):
     pst.control_data.noptmax = 3
     pst.write(os.path.join(t_d,"dsi.pst"),version=2)
     #pyemu.os_utils.run("pestpp-ies dsi.pst",cwd="dsi_template")
-    m_d = os.path.join(tmp_path,"master_dsi")
+    m_d = os.path.join(tmp_path,"master_dsi_base")
     pyemu.os_utils.start_workers(t_d,"pestpp-ies","dsi.pst",num_workers=15,worker_root=tmp_path,
                                  master_dir=m_d)
 
     # run test wtih truncated svd
     ends.prep_for_dsi(t_d=t_d,truncated_svd=True)
+    m_d = os.path.join(tmp_path,"master_dsi_svd")
     pst = pyemu.Pst(os.path.join(t_d,"dsi.pst"))
     pst.control_data.noptmax = 3
     pst.write(os.path.join(t_d,"dsi.pst"),version=2)
@@ -645,6 +646,7 @@ def ends_freyberg_dsi_test(tmp_path):
 
     # run test wtih normal score transform
     ends.prep_for_dsi(t_d=t_d,apply_normal_score_transform=True)
+    m_d = os.path.join(tmp_path,"master_dsi_ns")
     pst = pyemu.Pst(os.path.join(t_d,"dsi.pst"))
     pst.control_data.noptmax = 3
     pst.write(os.path.join(t_d,"dsi.pst"),version=2)
@@ -653,6 +655,7 @@ def ends_freyberg_dsi_test(tmp_path):
     
     # run test with log-transform
     pst = pyemu.Pst(pst_name)
+    m_d = os.path.join(tmp_path,"master_dsi_log")
     pst.pestpp_options["predictions"] = predictions
     pst.observation_data["obstransform"] = "log"
     ends = pyemu.EnDS(pst=pst, sim_ensemble=oe,verbose=True)
