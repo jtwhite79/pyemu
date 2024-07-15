@@ -5117,6 +5117,12 @@ def mf6_freyberg_thresh_test(tmp_path):
         #pyemu.os_utils.start_workers(pf.new_d, ies_exe_path, "freyberg.pst", worker_root=".", master_dir="master_thresh_mm",
         #                             num_workers=40)
     except Exception as e:
+
+        import warnings
+        with open(os.path.join(m_d,"freyberg.rec"),'r') as f:
+            for line in f:
+                warnings.warn(f.readline().strip(),DeprecationWarning)
+   
         os.chdir(bd)
         raise Exception(e)
     os.chdir(bd)
