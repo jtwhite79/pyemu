@@ -289,11 +289,15 @@ def start_workers(
         if verbose:
             print("master:{0} in {1}".format(" ".join(args), cwd))
         stdout = None
+        stderr = None
         if silent_master:
             stdout = open(os.devnull, "w")
+        elif verbose:
+            stdout = sp.PIPE
+            stderr = sp.STDOUT
         try:
             os.chdir(cwd)
-            master_p = sp.Popen(args, stdout=stdout)  # ,stdout=sp.PIPE,stderr=sp.PIPE)
+            master_p = sp.Popen(args, stdout=stdout,stderr=stderr)  # ,stdout=sp.PIPE,stderr=sp.PIPE)
             os.chdir(base_dir)
         except Exception as e:
             raise Exception("error starting master instance: {0}".format(str(e)))
@@ -350,8 +354,20 @@ def start_workers(
                 print(datetime.now(), "still running")
                 time.sleep(5)
         else:
-            master_p.wait()
+            
+            
+            if verbose:
+                while True:
+                    rv = master_p.poll()
+                    if master_p.poll() is not None:
+                        break
+                    for line in iter(master_p.stdout.readline, b''):
+                        print(">>> " + line.decode().rstrip())
+                    time.sleep(0.5)  # a few cycles to let the workers end gracefully
+            else:
+                master_p.wait()
             time.sleep(1.5)  # a few cycles to let the workers end gracefully
+
 
         # kill any remaining workers
         for p in procs:
