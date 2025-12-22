@@ -165,6 +165,15 @@ def pst_manip_test(tmp_path):
     new_par = pst.parameter_data
     assert np.isclose(np.abs(new_par.parubnd - org_par.parubnd).sum(), 0)
     assert np.isclose(np.abs(new_par.parlbnd - org_par.parlbnd).sum(), 0)
+    pst.add_par_center()
+    assert "center" in pst.parameter_data.columns
+    par = pst.parameter_data
+    print(par.center)
+    print(par.parubnd)
+    print(par.parlbnd)
+    assert np.isclose(par.loc["mult1","center"],0.790569)
+    assert np.isclose(par.loc["kr01c01","center"],200)
+
 
 def load_test(tmp_path):
     import os
@@ -1784,10 +1793,10 @@ if __name__ == "__main__":
     with this.
     """
     d = 'temp'
-    results_ies_3_test()
-    results_ies_1_test()
-    results_ies_2_test()
-    results_mou_1_test()
+    #results_ies_3_test()
+    #results_ies_1_test()
+    #results_ies_2_test()
+    #results_mou_1_test()
     #load_test(d)
     pst_manip_test(d)
     #parrep_test(d)

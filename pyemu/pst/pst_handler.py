@@ -3603,37 +3603,19 @@ class Pst(object):
 
         return obsg_df
 
-    # jwhite - 13 Aug 2019 - no one is using this write?
-    # def run(self,exe_name="pestpp",cwd=None):
-    #     """run a command related to the pst instance. If
-    #     write() has been called, then the filename passed to write
-    #     is in the command, otherwise the original constructor
-    #     filename is used
-    #
-    #     exe_name : str
-    #         the name of the executable to call.  Default is "pestpp"
-    #     cwd : str
-    #         the directory to execute the command in.  If None,
-    #         os.path.split(self.filename) is used to find
-    #         cwd.  Default is None
-    #
-    #
-    #     """
-    #     filename = self.filename
-    #     if self.new_filename is not None:
-    #         filename = self.new_filename
-    #     cmd_line = "{0} {1}".format(exe_name,os.path.split(filename)[-1])
-    #     if cwd is None:
-    #         cwd = os.path.join(*os.path.split(filename)[:-1])
-    #         if cwd == '':
-    #             cwd = '.'
-    #     print("executing {0} in dir {1}".format(cmd_line, cwd))
-    #     pyemu.utils.os_utils.run(cmd_line,cwd=cwd)
+    def add_par_center(self):
+        """add the center point between the parameter bounds as a
+        column in self.parameter_data, while respecting partrans
 
-    # @staticmethod
-    # def _is_less_const(name):
-    #     constraint_tags = ["l_", "less"]
-    #     return True in [True for c in constraint_tags if name.startswith(c)]
+        """
+        self.add_transform_columns()
+        par = self.parameter_data
+        islog = par.partrans == "log"
+
+        center = (par.parubnd_trans + par.parlbnd_trans) / 2.0
+        center.loc[islog] = 10.0**(center.loc[islog])
+        self.parameter_data["center"] = center
+
 
     @property
     def less_than_obs_constraints(self):
