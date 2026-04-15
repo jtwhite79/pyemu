@@ -883,7 +883,11 @@ def prep_pp_hyperpars(file_tag, pp_filename, pp_info,out_filename, grid_dict,
     for k in keys:
         if k == 'zone_array':
             continue
-        config_df.loc[k,"value"] = pp_options[k]
+        # skip non-scalar entries (e.g. tpg dict, prep_hyperpars bool with dict)
+        v = pp_options[k]
+        if isinstance(v, (dict, list, tuple)):
+            continue
+        config_df.loc[k,"value"] = v
 
     #config_df.loc["function_call","value"] = fnx_call
     config_df_filename = file_tag + ".config.csv"
@@ -902,6 +906,67 @@ def prep_pp_hyperpars(file_tag, pp_filename, pp_info,out_filename, grid_dict,
         raise RuntimeError(f"apply_ppu_hyperpars() error: {e}")
     os.chdir(bd)
     return config_df
+
+
+def prep_tpg(file_tag, y1_config_filename, y2_config_filename,
+             y1_mlt_filename, y2_mlt_filename,
+             marginals_y1, marginals_y2, facies_fill, ws="."):
+    """Write TPG configuration files at PstFrom setup time.
+
+    Creates two files:
+    - ``{file_tag}.tpg_pars.csv``: marginal proportions and facies fill
+      values (parameterizable by PEST).
+    - ``{file_tag}.tpg_config.csv``: master config pointing to Y1/Y2
+      hyperpars configs and the tpg_pars CSV.
+
+    Args:
+        file_tag (str): base name for output files
+        y1_config_filename (str): path to Y1 ``prep_pp_hyperpars`` config CSV
+        y2_config_filename (str): path to Y2 ``prep_pp_hyperpars`` config CSV
+        y1_mlt_filename (str): path where ``apply_tpg`` writes the TPG multiplier
+        y2_mlt_filename (str): path where ``apply_tpg`` writes Y2 neutral (1.0) multiplier
+        marginals_y1 (list): cumulative proportions along Y1 axis
+        marginals_y2 (list): cumulative proportions along Y2 axis
+        facies_fill (list): fill value per facies (length must equal
+            ``(len(marginals_y1)+1) * (len(marginals_y2)+1)``)
+        ws (str): workspace directory
+
+    Returns:
+        tuple: (tpg_config_filename, tpg_pars_filename) relative to *ws*
+    """
+    n_facies = (len(marginals_y1) + 1) * (len(marginals_y2) + 1)
+    if len(facies_fill) != n_facies:
+        raise ValueError(
+            f"facies_fill has {len(facies_fill)} entries but "
+            f"{len(marginals_y1)} Y1 marginals x {len(marginals_y2)} Y2 marginals "
+            f"implies {n_facies} facies")
+
+    # Write tpg_pars.csv (parameterizable)
+    tpg_pars = pd.DataFrame(columns=["value"])
+    tpg_pars.index.name = "parameter"
+    for i, m in enumerate(marginals_y1):
+        tpg_pars.loc[f"marginal_y1_{i}", "value"] = float(m)
+    for i, m in enumerate(marginals_y2):
+        tpg_pars.loc[f"marginal_y2_{i}", "value"] = float(m)
+    for i, fv in enumerate(facies_fill):
+        tpg_pars.loc[f"fill_{i}", "value"] = float(fv)
+
+    tpg_pars_filename = file_tag + ".tpg_pars.csv"
+    tpg_pars.to_csv(os.path.join(ws, tpg_pars_filename))
+
+    # Write tpg_config.csv (master config)
+    tpg_config = pd.DataFrame(columns=["value"])
+    tpg_config.index.name = "key"
+    tpg_config.loc["y1_config_filename", "value"] = y1_config_filename
+    tpg_config.loc["y2_config_filename", "value"] = y2_config_filename
+    tpg_config.loc["tpg_pars_filename", "value"] = tpg_pars_filename
+    tpg_config.loc["tpg_output_filename", "value"] = y1_mlt_filename
+    tpg_config.loc["y2_mlt_filename", "value"] = y2_mlt_filename
+
+    tpg_config_filename = file_tag + ".tpg_config.csv"
+    tpg_config.to_csv(os.path.join(ws, tpg_config_filename))
+
+    return tpg_config_filename, tpg_pars_filename
 
 
 def apply_ppu_hyperpars(config_df_filename):
@@ -975,4 +1040,82 @@ def apply_ppu_hyperpars(config_df_filename):
         np.savetxt(out_filename,result,fmt="%20.8E")
     # kill temp fac file
     os.remove(fac_fname)
+    return result
+
+
+def apply_tpg(tpg_config_filename):
+    """Apply truncated plurigaussian simulation at forward-run time.
+
+    Reads two kriged Gaussian fields (Y1, Y2) via apply_ppu_hyperpars,
+    applies truncation rule using empirical percentile thresholds from
+    the realized fields, maps facies to fill values, and writes the
+    result as a multiplier array.
+
+    Uses empirical thresholding (``np.percentile``) instead of
+    ``norm.ppf`` so that marginal proportions are honored exactly
+    regardless of kriging-induced variance shrinkage.
+
+    Args:
+        tpg_config_filename (str): Path to the TPG master config CSV
+            containing pointers to Y1 config, Y2 config, tpg_pars CSV,
+            output file path, and Y2 mlt file path.
+
+    Returns:
+        numpy.ndarray: The facies-filled multiplier array.
+    """
+    # Read TPG master config
+    config = pd.read_csv(tpg_config_filename, index_col=0)["value"].to_dict()
+
+    # Krige both Gaussian fields using existing apply_ppu_hyperpars
+    y1_field = apply_ppu_hyperpars(config["y1_config_filename"])
+    y2_field = apply_ppu_hyperpars(config["y2_config_filename"])
+
+    # Read current marginals and fill values from parameterizable CSV
+    tpg_pars = pd.read_csv(config["tpg_pars_filename"], index_col=0)
+
+    # Extract marginals
+    m_y1_keys = sorted([k for k in tpg_pars.index if k.startswith("marginal_y1_")])
+    m_y2_keys = sorted([k for k in tpg_pars.index if k.startswith("marginal_y2_")])
+    marginals_y1 = [float(tpg_pars.loc[k, "value"]) for k in m_y1_keys]
+    marginals_y2 = [float(tpg_pars.loc[k, "value"]) for k in m_y2_keys]
+
+    # Empirical thresholds from the actual kriged fields — guarantees
+    # exact marginal proportions regardless of field variance.
+    # p=0 → threshold at field min (0% below), p=1 → threshold at field max (100% below).
+    # Clip to [0, 1] for safety but allow the full range.
+    thresholds_y1 = [float(np.percentile(y1_field, np.clip(p, 0.0, 1.0) * 100))
+                     for p in marginals_y1]
+    thresholds_y2 = [float(np.percentile(y2_field, np.clip(p, 0.0, 1.0) * 100))
+                     for p in marginals_y2]
+
+    # Truncate to facies
+    bins_y1 = np.digitize(y1_field, thresholds_y1)
+    bins_y2 = np.digitize(y2_field, thresholds_y2)
+    n_bins_y1 = len(thresholds_y1) + 1
+    facies = bins_y2 * n_bins_y1 + bins_y1
+
+    # Extract fill values and map to facies
+    fill_keys = sorted([k for k in tpg_pars.index if k.startswith("fill_")])
+    result = np.ones_like(y1_field)
+    for fk in fill_keys:
+        fid = int(fk.split("_")[1])
+        fill_val = float(tpg_pars.loc[fk, "value"])
+        result[facies == fid] = fill_val
+
+    # Write the TPG multiplier
+    out_filename = config["tpg_output_filename"]
+    if out_filename.endswith(".npy"):
+        np.save(out_filename, result)
+    else:
+        np.savetxt(out_filename, result, fmt="%20.8E")
+
+    # Write neutral (1.0) array for Y2's mlt location
+    y2_mlt_filename = config.get("y2_mlt_filename")
+    if y2_mlt_filename is not None:
+        neutral = np.ones_like(result)
+        if y2_mlt_filename.endswith(".npy"):
+            np.save(y2_mlt_filename, neutral)
+        else:
+            np.savetxt(y2_mlt_filename, neutral, fmt="%20.8E")
+
     return result

@@ -4085,6 +4085,174 @@ def parse_rmr_file(rmr_file):
     return df
 
 
+def setup_tpg_pars(pf, filenames, par_name_base, geostruct_y1, geostruct_y2,
+                   marginals_y1=(0.5,0.5), marginals_y2=(0.5,0.5), facies_fill=None,
+                   zone_array=None, pp_space_y1=5, pp_space_y2=5,
+                   apply_order=999, pp_options_y1=None, pp_options_y2=None):
+    """Set up truncated plurigaussian (TPG) facies parameterization.
+
+    High-level helper that registers Y1 and Y2 Gaussian field pilot points
+    and the TPG parameters CSV (marginal proportions + facies fill values)
+    with a PstFrom instance.  The output is a multiplier array in ``mult/``
+    that can be stacked with other parameter types via ``apply_order``.
+
+    4 facies: ``len(marginals_y1)==1, len(marginals_y2)==1``
+    9 facies: ``len(marginals_y1)==2, len(marginals_y2)==2``
+
+    Args:
+        pf (PstFrom): PstFrom instance (already initialized)
+        filenames: model input file(s) to parameterize
+        par_name_base (str): base name for parameter groups (e.g. ``"hk_tpg"``)
+        geostruct_y1 (GeoStruct): geostructure for Y1 field
+            (``transform`` should be ``"none"``)
+        geostruct_y2 (GeoStruct): geostructure for Y2 field
+        marginals_y1 (list): cumulative proportions along Y1 axis
+        marginals_y2 (list): cumulative proportions along Y2 axis
+        facies_fill (list): fill value per facies.  Length must equal
+            ``(len(marginals_y1)+1) * (len(marginals_y2)+1)``.
+            Default: all 1.0
+        zone_array: active-cell array
+        pp_space_y1 (int): pilot point spacing for Y1
+        pp_space_y2 (int): pilot point spacing for Y2
+        apply_order (int): execution order (default 0, before standard multipliers)
+        pp_options_y1 (dict): extra pp_options overrides for Y1
+        pp_options_y2 (dict): extra pp_options overrides for Y2
+
+    Returns:
+        dict: ``{"y1": y1_par_df, "y2": y2_par_df, "tpg_pars_filename": str}``
+    """
+    marginals_y1 = list(marginals_y1)
+    marginals_y2 = list(marginals_y2)
+    n_facies = (len(marginals_y1) + 1) * (len(marginals_y2) + 1)
+    if facies_fill is None:
+        facies_fill = [1.0] * n_facies
+    facies_fill = list(facies_fill)
+    if len(facies_fill) != n_facies:
+        raise ValueError(
+            f"facies_fill has {len(facies_fill)} entries but "
+            f"{len(marginals_y1)} Y1 x {len(marginals_y2)} Y2 marginals "
+            f"implies {n_facies} facies")
+
+    y1_pargp = par_name_base + "_y1_pp"
+    y2_pargp = par_name_base + "_y2_pp"
+
+    # Build pp_options for Y1
+    y1_opts = {
+        "pp_space": pp_space_y1,
+        "try_use_ppu": True,
+        "prep_hyperpars": True,
+        "tpg": {
+            "role": "y1",
+            "partner_pargp": y2_pargp,
+            "marginals_y1": marginals_y1,
+            "marginals_y2": marginals_y2,
+            "facies_fill": facies_fill,
+            # These will be filled after Y2 add_parameters runs:
+            "partner_config_filename": None,
+            "partner_mlt_filename": None,
+        },
+    }
+    if pp_options_y1:
+        y1_opts.update(pp_options_y1)
+
+    # Build pp_options for Y2
+    y2_opts = {
+        "pp_space": pp_space_y2,
+        "try_use_ppu": True,
+        "prep_hyperpars": True,
+        "tpg": {
+            "role": "y2",
+            "partner_pargp": y1_pargp,
+        },
+    }
+    if pp_options_y2:
+        y2_opts.update(pp_options_y2)
+
+    # Call Y2 first so we can get its config filename for Y1's tpg setup
+    y2_df = pf.add_parameters(
+        filenames=filenames,
+        par_type="pilotpoints",
+        par_name_base=par_name_base + "_y2",
+        pargp=y2_pargp,
+        transform="none",
+        initial_value=0.0,
+        lower_bound=-3.5,
+        upper_bound=3.5,
+        par_style="m",
+        geostruct=geostruct_y2,
+        zone_array=zone_array,
+        apply_order=apply_order+1,
+        pp_options=y2_opts,
+    )
+
+    # Now we can find Y2's config and mlt filenames
+    # The config filename follows the pattern: {cleaned_pargp}.config.csv
+    illegal_chars = [c for c in r"/:*?<>\|"]
+    y2_tag = y2_pargp
+    for c in illegal_chars:
+        y2_tag = y2_tag.replace(c, "-")
+    y2_config_fn = y2_tag + ".config.csv"
+    # Y2's mlt filename: find from the last parfile relation
+    y2_mlt_fn = None
+    for rel_df in pf._parfile_relations:
+        if "mlt_file" in rel_df.columns:
+            for mf in rel_df["mlt_file"].dropna():
+                if y2_pargp.replace("_", "") in str(mf).replace("_", "") or \
+                   par_name_base + "_y2" in str(mf):
+                    y2_mlt_fn = str(mf)
+    if y2_mlt_fn is None:
+        # Fallback: construct from convention
+        y2_mlt_fn = os.path.join("mult", par_name_base + "_y2_mlt.dat")
+
+    # Set Y1's partner info
+    y1_opts["tpg"]["partner_config_filename"] = y2_config_fn
+    y1_opts["tpg"]["partner_mlt_filename"] = y2_mlt_fn
+
+    # Call Y1 — this triggers prep_tpg inside add_parameters
+    y1_df = pf.add_parameters(
+        filenames=filenames,
+        par_type="pilotpoints",
+        par_name_base=par_name_base + "_y1",
+        pargp=y1_pargp,
+        transform="none",
+        initial_value=0.0,
+        lower_bound=-3.5,
+        upper_bound=3.5,
+        par_style="m",
+        geostruct=geostruct_y1,
+        zone_array=zone_array,
+        apply_order=apply_order+1,
+        pp_options=y1_opts,
+    )
+
+    # Find the tpg_pars.csv filename
+    y1_tag = y1_pargp
+    for c in illegal_chars:
+        y1_tag = y1_tag.replace(c, "-")
+    tpg_pars_fn = y1_tag + ".tpg_pars.csv"
+
+    # Register TPG pars (marginals + fills) as PEST parameters.
+    # par_type="grid" gives one parameter per row (each marginal
+    # and fill value is independently adjustable).
+    tpg_pars_df = pf.add_parameters(
+        tpg_pars_fn,
+        par_type="grid",
+        par_name_base=par_name_base + "-tpgpars",
+        pargp=par_name_base + "-tpgpars",
+        index_cols=["parameter"],
+        use_cols=["value"],
+        par_style="d",
+        transform="none",
+    )
+
+    return {
+        "y1": y1_df,
+        "y2": y2_df,
+        "tpg_pars": tpg_pars_df,
+        "tpg_pars_filename": tpg_pars_fn,
+    }
+
+
 def setup_threshold_pars(orgarr_file,cat_dict,testing_workspace=".",inact_arr=None):
     """setup a thresholding 2-category binary array process.
 

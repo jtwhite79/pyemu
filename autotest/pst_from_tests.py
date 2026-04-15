@@ -5639,6 +5639,265 @@ def test_hyperpars(tmp_path):
     #     ax.set_title(Path(f).stem)
 
 
+def test_tpg_4facies(tmp_path):
+    """Test basic TPG with 4 facies on Freyberg npf_k_layer1."""
+    import numpy as np
+    import pandas as pd
+    tdir = os.getcwd()
+    os.chdir(Path(tmp_path))
+    try:
+        pf, sim = setup_freyberg_mf6(tmp_path)
+    except Exception:
+        os.chdir(tdir)
+        return
+    m = sim.get_model()
+    ib = m.dis.idomain[0].array
+    template_ws = pf.new_d
+
+    v_y1 = pyemu.geostats.ExpVario(contribution=1.0, a=3000, bearing=30, anisotropy=3)
+    gs_y1 = pyemu.geostats.GeoStruct(variograms=v_y1, transform="none")
+    v_y2 = pyemu.geostats.ExpVario(contribution=1.0, a=2000, bearing=110, anisotropy=1.5)
+    gs_y2 = pyemu.geostats.GeoStruct(variograms=v_y2, transform="none")
+
+    arr_file = "freyberg6.npf_k_layer1.txt"
+
+    tpg_dfs = pyemu.helpers.setup_tpg_pars(
+        pf, arr_file, par_name_base="k1tpg",
+        geostruct_y1=gs_y1, geostruct_y2=gs_y2,
+        marginals_y1=[0.4],
+        marginals_y2=[0.5],
+        facies_fill=[0.01, 0.1, 1.0, 10.0],
+        zone_array=ib,
+        pp_space_y1=4, pp_space_y2=4,
+    )
+
+    pf.mod_sys_cmds.append(mf6_exe_path)
+    pst = pf.build_pst("freyberg.pst")
+    par = pst.parameter_data
+
+    # Verify Y1/Y2 pargps exist with correct properties
+    y1_pars = par.loc[par.pargp == "k1tpg_y1_pp"]
+    y2_pars = par.loc[par.pargp == "k1tpg_y2_pp"]
+    assert len(y1_pars) > 0, "no Y1 pars found"
+    assert len(y2_pars) > 0, "no Y2 pars found"
+    assert all(y1_pars.partrans == "none")
+    assert all(y2_pars.partrans == "none")
+    assert np.allclose(y1_pars.parval1, 0.0)
+
+    # Verify tpg_pars.csv exists with expected entries
+    tpg_csvs = [f for f in os.listdir(template_ws)
+                if "tpg_pars" in f and f.endswith(".csv")]
+    assert len(tpg_csvs) > 0, "no tpg_pars.csv found"
+    tpg_df = pd.read_csv(os.path.join(template_ws, tpg_csvs[0]), index_col=0)
+    assert "marginal_y1_0" in tpg_df.index
+    assert "marginal_y2_0" in tpg_df.index
+    assert "fill_0" in tpg_df.index
+    assert "fill_3" in tpg_df.index
+
+    # Test forward parameter application
+    check_apply(pf)
+
+    # Verify multiplier was written with correct fill values
+    mlt_files = list(Path(template_ws, "mult").glob("*k1tpg_y1*"))
+    assert len(mlt_files) > 0, "no Y1 mlt file found"
+    mlt = np.loadtxt(mlt_files[0])
+    unique_vals = np.unique(mlt[ib > 0])
+    assert len(unique_vals) == 4, f"expected 4 fill values, got {len(unique_vals)}: {unique_vals}"
+    for fv in [0.01, 0.1, 1.0, 10.0]:
+        assert np.isclose(unique_vals, fv).any(), f"fill value {fv} not in multiplier"
+
+    os.chdir(tdir)
+
+
+def test_tpg_9facies(tmp_path):
+    """Test 9-facies TPG with parameterized marginals and fill values."""
+    import numpy as np
+    import pandas as pd
+    tdir = os.getcwd()
+    os.chdir(Path(tmp_path))
+    try:
+        pf, sim = setup_freyberg_mf6(tmp_path)
+    except Exception:
+        os.chdir(tdir)
+        return
+    m = sim.get_model()
+    ib = m.dis.idomain[0].array
+    template_ws = pf.new_d
+
+    v_y1 = pyemu.geostats.ExpVario(contribution=1.0, a=3000, bearing=45, anisotropy=4)
+    gs_y1 = pyemu.geostats.GeoStruct(variograms=v_y1, transform="none")
+    v_y2 = pyemu.geostats.ExpVario(contribution=1.0, a=2500, bearing=135, anisotropy=2)
+    gs_y2 = pyemu.geostats.GeoStruct(variograms=v_y2, transform="none")
+
+    arr_file = "freyberg6.npf_k_layer1.txt"
+    tpg_dfs = pyemu.helpers.setup_tpg_pars(
+        pf, arr_file, par_name_base="k1tpg",
+        geostruct_y1=gs_y1, geostruct_y2=gs_y2,
+        marginals_y1=[0.3, 0.7],
+        marginals_y2=[0.4, 0.8],
+        facies_fill=[1e-4, 1e-2, 1e-1, 1e-3, 1e-1, 1.0, 1e-2, 1.0, 10.0],
+        zone_array=ib,
+        pp_space_y1=4, pp_space_y2=4,
+    )
+
+    pf.mod_sys_cmds.append(mf6_exe_path)
+    pst = pf.build_pst("freyberg.pst")
+
+    # Verify tpg_pars has 4 marginals + 9 fills
+    tpg_csvs = [f for f in os.listdir(template_ws)
+                if "tpg_pars" in f and f.endswith(".csv")]
+    assert len(tpg_csvs) > 0
+    tpg_df = pd.read_csv(os.path.join(template_ws, tpg_csvs[0]), index_col=0)
+    assert "marginal_y1_1" in tpg_df.index
+    assert "marginal_y2_1" in tpg_df.index
+    for i in range(9):
+        assert f"fill_{i}" in tpg_df.index
+
+    check_apply(pf)
+
+    # Verify 9 unique fill values in multiplier
+    mlt_files = list(Path(template_ws, "mult").glob("*k1tpg_y1*"))
+    assert len(mlt_files) > 0
+    mlt = np.loadtxt(mlt_files[0])
+    unique_vals = np.unique(mlt[ib > 0])
+    assert len(unique_vals) == 9, f"expected 9, got {len(unique_vals)}: {unique_vals}"
+
+    # Modify a marginal and re-apply — result should change
+    tpg_csv_path = os.path.join(template_ws, tpg_csvs[0])
+    tpg_df.loc["marginal_y1_0", "value"] = 0.1
+    tpg_df.to_csv(tpg_csv_path)
+    check_apply(pf)
+    mlt2 = np.loadtxt(mlt_files[0])
+    assert not np.array_equal(mlt, mlt2), "changing marginal should change output"
+
+    os.chdir(tdir)
+
+
+def test_tpg_ensemble_draw(tmp_path):
+    """Test that ensemble draws produce N(0,1) correlated fields for Y1/Y2."""
+    import numpy as np
+    tdir = os.getcwd()
+    os.chdir(Path(tmp_path))
+    try:
+        pf, sim = setup_freyberg_mf6(tmp_path)
+    except Exception:
+        os.chdir(tdir)
+        return
+    m = sim.get_model()
+    ib = m.dis.idomain[0].array
+
+    v_y1 = pyemu.geostats.ExpVario(contribution=1.0, a=3000)
+    gs_y1 = pyemu.geostats.GeoStruct(variograms=v_y1, transform="none")
+    v_y2 = pyemu.geostats.ExpVario(contribution=1.0, a=2000)
+    gs_y2 = pyemu.geostats.GeoStruct(variograms=v_y2, transform="none")
+
+    arr_file = "freyberg6.npf_k_layer1.txt"
+    tpg_dfs = pyemu.helpers.setup_tpg_pars(
+        pf, arr_file, par_name_base="k1tpg",
+        geostruct_y1=gs_y1, geostruct_y2=gs_y2,
+        facies_fill=[0.01, 0.1, 1.0, 10.0],
+        zone_array=ib,
+    )
+
+    pf.mod_sys_cmds.append(mf6_exe_path)
+    pst = pf.build_pst("freyberg.pst")
+
+    pe = pf.draw(num_reals=30, sigma_range=7)
+    pe.enforce()
+
+    par = pst.parameter_data
+    y1_names = par.loc[par.pargp == "k1tpg_y1_pp", "parnme"].values
+    y2_names = par.loc[par.pargp == "k1tpg_y2_pp", "parnme"].values
+    assert len(y1_names) > 0
+    assert len(y2_names) > 0
+
+    y1_vals = pe.loc[:, y1_names].values
+    y2_vals = pe.loc[:, y2_names].values
+
+    # Should be roughly N(0,1)
+    assert abs(y1_vals.mean()) < 1.0, f"Y1 mean: {y1_vals.mean()}"
+    assert abs(y2_vals.mean()) < 1.0, f"Y2 mean: {y2_vals.mean()}"
+    assert 0.1 < y1_vals.std() < 3.0, f"Y1 std: {y1_vals.std()}"
+    assert 0.1 < y2_vals.std() < 3.0, f"Y2 std: {y2_vals.std()}"
+
+    # Y1 and Y2 should be independent
+    for r in range(min(5, len(pe))):
+        corr = np.corrcoef(y1_vals[r], y2_vals[r])[0, 1]
+        assert abs(corr) < 0.7, f"Y1/Y2 too correlated in real {r}: {corr}"
+
+    os.chdir(tdir)
+
+
+def test_tpg_extreme_proportions(tmp_path):
+    """Test TPG with proportion=0 and proportion close to 1."""
+    import numpy as np
+    import pandas as pd
+    tdir = os.getcwd()
+    os.chdir(Path(tmp_path))
+    try:
+        pf, sim = setup_freyberg_mf6(tmp_path)
+    except Exception:
+        os.chdir(tdir)
+        return
+    m = sim.get_model()
+    ib = m.dis.idomain[0].array
+    template_ws = pf.new_d
+
+    v_y1 = pyemu.geostats.ExpVario(contribution=1.0, a=3000)
+    gs_y1 = pyemu.geostats.GeoStruct(variograms=v_y1, transform="none")
+    v_y2 = pyemu.geostats.ExpVario(contribution=1.0, a=2000)
+    gs_y2 = pyemu.geostats.GeoStruct(variograms=v_y2, transform="none")
+
+    arr_file = "freyberg6.npf_k_layer1.txt"
+
+    # Test with marginal_y1 = 0.0 (first Y1 bin gets 0% proportion)
+    tpg_dfs = pyemu.helpers.setup_tpg_pars(
+        pf, arr_file, par_name_base="k1tpg",
+        geostruct_y1=gs_y1, geostruct_y2=gs_y2,
+        marginals_y1=[0.0],
+        marginals_y2=[0.5],
+        facies_fill=[0.01, 0.1, 1.0, 10.0],
+        zone_array=ib,
+        pp_space_y1=4, pp_space_y2=4,
+    )
+
+    pf.mod_sys_cmds.append(mf6_exe_path)
+    pst = pf.build_pst("freyberg.pst")
+    check_apply(pf)
+
+    # Check the multiplier — with marginal_y1=0, facies 0 and 2 should have ~0%
+    mlt_files = list(Path(template_ws, "mult").glob("*k1tpg_y1*"))
+    assert len(mlt_files) > 0
+    mlt = np.loadtxt(mlt_files[0])
+    unique_vals = np.unique(mlt[ib > 0])
+
+    # Fill values 0.01 and 1.0 (facies 0 and 2, which need Y1<t1)
+    # should be absent or near-zero since marginal_y1=0
+    prop_001 = np.mean(np.isclose(mlt[ib > 0], 0.01))
+    prop_1 = np.mean(np.isclose(mlt[ib > 0], 1.0))
+    assert prop_001 < 0.01, f"facies 0 (fill=0.01) should be ~0% but got {prop_001:.1%}"
+    assert prop_1 < 0.01, f"facies 2 (fill=1.0) should be ~0% but got {prop_1:.1%}"
+
+    # Now modify the tpg_pars.csv to test marginal close to 1
+    tpg_csvs = [f for f in os.listdir(template_ws)
+                if "tpg_pars" in f and f.endswith(".csv")]
+    tpg_csv_path = os.path.join(template_ws, tpg_csvs[0])
+    tpg_df = pd.read_csv(tpg_csv_path, index_col=0)
+    tpg_df.loc["marginal_y1_0", "value"] = 0.98
+    tpg_df.to_csv(tpg_csv_path)
+
+    check_apply(pf)
+    mlt2 = np.loadtxt(mlt_files[0])
+
+    # With marginal_y1=0.98, facies 1 and 3 (which need Y1>=t1) should be ~2%
+    prop_01 = np.mean(np.isclose(mlt2[ib > 0], 0.1))
+    prop_10 = np.mean(np.isclose(mlt2[ib > 0], 10.0))
+    assert prop_01 < 0.05, f"facies 1 (fill=0.1) should be ~2% but got {prop_01:.1%}"
+    assert prop_10 < 0.05, f"facies 3 (fill=10.0) should be ~2% but got {prop_10:.1%}"
+
+    os.chdir(tdir)
+
+
 def mf6_freyberg_ppu_hyperpars_invest(tmp_path):
     import numpy as np
     import pandas as pd

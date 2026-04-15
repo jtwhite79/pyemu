@@ -2672,9 +2672,43 @@ class PstFrom(object):
                         #if "pypestutils" not in self.extra_py_imports:
                         #    self.extra_py_imports.append("pypestutils")
                         print(config_df_filename)
-                        config_func_str = "pyemu.utils.pp_utils.apply_ppu_hyperpars('{0}')".\
-                                          format(config_df_filename)
-                        pp_mult_dict["pre_apply_function"] = config_func_str
+
+                        # Check for TPG (truncated plurigaussian) setup
+                        tpg_opts = pp_options.get("tpg", None)
+                        if tpg_opts is not None and tpg_opts.get("role") == "y1":
+                            # Y1 role: write TPG config and override pre_apply_function
+                            # to apply_tpg (which internally calls apply_ppu_hyperpars
+                            # for both Y1 and Y2)
+                            tpg_config_fn, tpg_pars_fn = pp_utils.prep_tpg(
+                                pg,
+                                config_df_filename,
+                                tpg_opts["partner_config_filename"],
+                                os.path.join("mult", mlt_filename),
+                                tpg_opts["partner_mlt_filename"],
+                                tpg_opts["marginals_y1"],
+                                tpg_opts["marginals_y2"],
+                                tpg_opts["facies_fill"],
+                                ws=self.new_d,
+                            )
+                            config_func_str = "pyemu.utils.pp_utils.apply_tpg('{0}')".format(
+                                tpg_config_fn)
+                            self.logger.log(f"TPG y1 role: pre_apply -> {config_func_str}")
+                        elif tpg_opts is not None and tpg_opts.get("role") == "y2":
+                            # Y2 role: the Y1 apply_tpg handles both fields.
+                            # Set pre_apply to a no-op that writes 1.0s.
+                            # (apply_tpg from Y1 will also write 1.0s here,
+                            # but we need a valid mlt_file for the first build_pst test)
+                            neutral = np.ones(shape)
+                            neutral_path = os.path.join(self.new_d, "mult", mlt_filename)
+                            np.savetxt(neutral_path, neutral, fmt="%20.8E")
+                            config_func_str = None  # no pre_apply needed
+                            self.logger.log("TPG y2 role: neutral multiplier written")
+                        else:
+                            config_func_str = "pyemu.utils.pp_utils.apply_ppu_hyperpars('{0}')".\
+                                              format(config_df_filename)
+
+                        if config_func_str is not None:
+                            pp_mult_dict["pre_apply_function"] = config_func_str
                         # currently apply-time fac2real flagging is on the basis
                         # of the presence of pp_file in the mult2model info file
                         # for hyperpars fac2real is run within apply_ppu_hyperpars
