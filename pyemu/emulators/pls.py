@@ -71,7 +71,7 @@ def pls_file_forward_run(emu_file="pls.pickle",
         raise e
 
 
-def pls_runstore_forward_run(ws='.', pst_name="pls", emu_file="emulator.pkl"):
+def pls_runstore_forward_run(ws='.', pst_name=None, emu_file="emulator.pkl"):
     """Runstor-based forward-run helper for a fitted PLS emulator.
 
     PESTPP-IES in panther / external run-manager mode (``/e``) reads/writes
@@ -90,6 +90,26 @@ def pls_runstore_forward_run(ws='.', pst_name="pls", emu_file="emulator.pkl"):
     import traceback
     from pyemu.utils.helpers import RunStor
 
+    def _find_runstore(ws, pst_name):
+        """Locate the run store, preferring an explicit case name."""
+        if pst_name is not None:
+            cand = os.path.join(ws, "{0}.rns".format(pst_name))
+            if os.path.exists(cand):
+                return cand
+        # listdir, not glob: ws is a directory *path*, and glob would read
+        # any of * ? [ ] in it as pattern syntax -- a worker directory named
+        # e.g. "run[1]" then matches nothing and this looks like a missing
+        # run store.
+        found = sorted(f for f in os.listdir(ws) if f.lower().endswith(".rns"))
+        if len(found) == 1:
+            return os.path.join(ws, found[0])
+        if len(found) > 1:
+            raise RuntimeError(
+                "multiple run stores in '{0}': {1} -- pass pst_name".format(
+                    ws, found))
+        raise FileNotFoundError(
+            "no '*.rns' run store found in '{0}'".format(ws))
+
     try:
         try:
             from pyemu.emulators import PLS
@@ -98,20 +118,14 @@ def pls_runstore_forward_run(ws='.', pst_name="pls", emu_file="emulator.pkl"):
 
         emu = PLS.load(os.path.join(ws, emu_file))
 
-        fname = os.path.join(ws, "{0}.rns".format(pst_name))
-        if not os.path.exists(fname):
-            # Fall back to a few common names PESTPP-IES might have written.
-            for alt in ("pls.rns", "dsi.rns"):
-                cand = os.path.join(ws, alt)
-                if os.path.exists(cand):
-                    fname = cand
-                    break
+        fname = _find_runstore(ws, pst_name)
         header, par_names, obs_names = RunStor.file_info(fname)
         rs = RunStor(fname)
         df = rs.get_data()
 
-        # Pass through the predictor -- _coerce_to_input_df silently drops
-        # any extra columns and validates the required input_names.
+        # Selection by label is sound because the emulator's control file
+        # never carries a name as both a parameter and an observation --
+        # _get_emulator_observations drops any input_names from the obs block.
         pvals = df.loc[:, [p for p in par_names if p in df.columns]]
         simvals = emu.predict(pvals)
         if not isinstance(simvals, pd.DataFrame):
@@ -168,6 +182,13 @@ class PLS(Emulator):
         chosen by k-fold cross-validation on the training data.
     cv_folds : int, default 5
         Number of folds used when ``n_components`` is selected by CV.
+    max_components : int, optional
+        Upper bound on the number of latent factors the CV scan may select.
+        Truncates the anchor ladder, so capped anchors are never fitted at
+        all rather than being clipped after the fact. Has no effect when
+        ``n_components`` is given explicitly. How much of a finite training
+        ensemble to trust is a modelling judgement -- this exposes the knob
+        without imposing a default.
     parameter_reducer : sklearn-style transformer, optional
         Optional dimension-reducer fit on the input matrix before PLS (e.g.
         ``sklearn.decomposition.PCA`` or
@@ -188,6 +209,7 @@ class PLS(Emulator):
                  transforms: Optional[List[dict]] = None,
                  n_components: Optional[int] = None,
                  cv_folds: int = 5,
+                 max_components: Optional[int] = None,
                  parameter_reducer=None,
                  verbose: bool = False) -> None:
         super().__init__(verbose=verbose)
@@ -241,6 +263,10 @@ class PLS(Emulator):
         self.transforms = transforms
         self.n_components = n_components
         self.cv_folds = int(cv_folds)
+        self.max_components = None if max_components is None else int(max_components)
+        if self.max_components is not None and self.max_components < 1:
+            raise ValueError("max_components must be >= 1, not {0}".format(
+                self.max_components))
         self.parameter_reducer = parameter_reducer
 
         self.pls_ = None
@@ -399,27 +425,52 @@ class PLS(Emulator):
         splits = list(kf.split(X))
         min_train = min(len(train_idx) for train_idx, _ in splits)
         max_k = max(1, min(min_train, X.shape[1], Y.shape[1]))
+        if self.max_components is not None:
+            max_k = max(1, min(max_k, self.max_components))
 
         scores: dict = {}
+        skipped: dict = {}
         anchors = self._log_anchors(max_k)
         for k in anchors:
             errs = []
+            finite = True
             for train_idx, val_idx in splits:
                 pls = PLSRegression(n_components=k)
                 pls.fit(X[train_idx], Y[train_idx])
                 pred = pls.predict(X[val_idx])
+                if not np.all(np.isfinite(pred)):
+                    finite = False
+                    break
                 errs.append(np.sqrt(np.mean((pred - Y[val_idx]) ** 2)))
-            mean_rmse = float(np.mean(errs))
+            mean_rmse = float(np.mean(errs)) if finite else float("nan")
+            # A degenerate anchor must be excluded, not merely outscored.
+            # min() over a dict containing NaN is order-dependent, so relying
+            # on a bad anchor's RMSE being large is luck of the criterion
+            # rather than a guard.
+            if not finite or not np.isfinite(mean_rmse):
+                skipped[k] = mean_rmse
+                self.logger.statement(
+                    "cv n_components={0}: non-finite, skipped".format(k))
+                continue
             scores[k] = mean_rmse
             self.logger.statement(
                 "cv n_components={0}: rmse={1:.4g}".format(k, mean_rmse))
 
+        self._cv_scores = scores
+        self._cv_skipped = skipped
+        if not scores:
+            raise RuntimeError(
+                "PLS cv found no anchor with finite predictions in [1,{0}]; "
+                "tried {1}".format(max_k, sorted(skipped)))
+
         best_k = min(scores, key=lambda kk: scores[kk])
         best_rmse = scores[best_k]
-        self._cv_scores = scores
         self.logger.statement(
             "cv selected n_components={0} (rmse={1:.4g}); {2} anchors "
-            "evaluated in [1,{3}]".format(best_k, best_rmse, len(scores), max_k))
+            "evaluated in [1,{3}]{4}".format(
+                best_k, best_rmse, len(scores), max_k,
+                "; {0} skipped as non-finite".format(len(skipped))
+                if skipped else ""))
         return best_k
 
     def fit(self) -> "PLS":
@@ -533,22 +584,31 @@ class PLS(Emulator):
     def _get_emulator_parameters(self, pst=None) -> pd.DataFrame:
         """Parameter table consumed by the base-class ``prepare_pestpp`` machinery.
 
-        Source priority:
+        Source priority, each falling through to the next when it yields no
+        usable rows:
 
         1. Explicit ``pst`` arg passed to ``prepare_pestpp``.
         2. ``self.parameter_data`` cached at construction (when ``pst`` was
            supplied to ``__init__``).
-        3. Last-ditch synthesized rows from training-data column statistics.
-        """
-        if pst is not None and hasattr(pst, "parameter_data"):
-            src = pst.parameter_data
-        elif self.parameter_data is not None:
-            src = self.parameter_data
-        else:
-            src = None
+        3. Synthesized rows from training-data column statistics.
 
-        if src is not None:
+        The fallback is per-table, matching ``_get_emulator_observations``.
+        ``input_names`` are not always pst parameters -- conditioning an
+        emulator on part of its own output vector makes them observation
+        names -- and committing to a source holding none of them returns an
+        empty parameter table, which silently yields a control file with no
+        adjustable parameters.
+        """
+        sources = []
+        if pst is not None and hasattr(pst, "parameter_data"):
+            sources.append(pst.parameter_data)
+        if self.parameter_data is not None:
+            sources.append(self.parameter_data)
+
+        for src in sources:
             valid = [n for n in self.input_names if n in src.index]
+            if not valid:
+                continue
             if len(valid) != len(self.input_names):
                 missing = sorted(set(self.input_names) - set(valid))
                 self.logger.statement(
@@ -558,6 +618,9 @@ class PLS(Emulator):
             par_df["parnme"] = par_df.index
             return par_df
 
+        self.logger.statement(
+            "no input_names found in parameter_data; synthesizing parameter "
+            "table from training-data statistics")
         train_X = self.data.loc[:, self.input_names]
         df = pd.DataFrame(index=self.input_names)
         df["parnme"] = self.input_names
@@ -568,25 +631,51 @@ class PLS(Emulator):
         df["partrans"] = "none"
         return df
 
+    def _emulator_obs_names(self) -> list:
+        """``output_names`` minus anything already declared as an input.
+
+        A name cannot be both a parameter and an observation in the emulator's
+        own control file -- the two namespaces would collide, and the run store
+        (which addresses both blocks by label) cannot then tell them apart.
+        ``input_names`` are parameters as far as this emulator is concerned, so
+        where the two lists overlap the observation side gives way.  The
+        emulator still *predicts* the full ``output_names``; only the control
+        file's obs block is trimmed.
+        """
+        in_set = set(self.input_names)
+        names = [n for n in self.output_names if n not in in_set]
+        dropped = len(self.output_names) - len(names)
+        if dropped:
+            self.logger.statement(
+                "dropped {0} output_names from the obs block: also "
+                "input_names, and a control file cannot carry a name as both "
+                "a parameter and an observation".format(dropped))
+        if not names:
+            raise ValueError(
+                "every output_name is also an input_name; the emulator "
+                "control file would have no observations")
+        return names
+
     def _get_emulator_observations(self, pst=None) -> pd.DataFrame:
         """Observation table consumed by the base-class ``prepare_pestpp`` machinery."""
+        output_names = self._emulator_obs_names()
         if pst is not None and hasattr(pst, "observation_data"):
-            valid = [n for n in self.output_names if n in pst.observation_data.index]
+            valid = [n for n in output_names if n in pst.observation_data.index]
             if valid:
                 obs_df = pst.observation_data.loc[valid].copy()
                 obs_df["obsnme"] = obs_df.index
                 return obs_df
 
         if self.observation_data is not None:
-            valid = [n for n in self.output_names if n in self.observation_data.index]
+            valid = [n for n in output_names if n in self.observation_data.index]
             if valid:
                 obs_df = self.observation_data.loc[valid].copy()
                 obs_df["obsnme"] = obs_df.index
                 return obs_df
 
-        train_Y = self.data.loc[:, self.output_names]
-        df = pd.DataFrame(index=self.output_names)
-        df["obsnme"] = self.output_names
+        train_Y = self.data.loc[:, output_names]
+        df = pd.DataFrame(index=output_names)
+        df["obsnme"] = output_names
         df["obsval"] = train_Y.mean(axis=0).values
         df["weight"] = 1.0
         df["obgnme"] = "pls_pred"

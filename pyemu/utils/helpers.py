@@ -1544,8 +1544,14 @@ class RunStor(object):
         header, par_names, obs_names = RunStor.file_info(self.filename)
         if header["n_runs"] != df.shape[0]:
             raise Exception("number of runs implied by df nrows {0} != n_runs in file {1}".format(df.shape[0],header["n_runs"]))
-        par_vals = df.loc[:,par_names].values
-        obs_vals = df.loc[:,obs_names].values
+        # positional, not df.loc[:,names]: pest allows a par and an obs to
+        # share a name, and label selection then returns both columns for each
+        # -- a double-width par block that shifts every run after the first.
+        # The file, file_info() and get_data() are all order-based with the
+        # par block first; this keeps update() to the same convention.
+        npar, nobs = len(par_names), len(obs_names)
+        par_vals = df.iloc[:, -(npar + nobs):-nobs].values
+        obs_vals = df.iloc[:, -nobs:].values
         run_status = df.run_status.astype(np.int8).values
         run_pos = df.run_pos.values
         offset =  1 + self.info_txt_size
