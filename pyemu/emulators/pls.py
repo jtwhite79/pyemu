@@ -271,6 +271,7 @@ class PLS(Emulator):
 
         self.pls_ = None
         self._fitted_reducer = None
+        self.residuals_ = None
 
         self.data_transformed = self._prepare_training_data()
 
@@ -369,8 +370,14 @@ class PLS(Emulator):
         if self.parameter_reducer is None:
             return X
         if fit:
-            X_reduced = self.parameter_reducer.fit_transform(X)
-            self._fitted_reducer = self.parameter_reducer
+            # deepcopy first: assigning self.parameter_reducer straight to
+            # _fitted_reducer aliases the caller's object, so passing one
+            # reducer instance to two emulators makes the second fit silently
+            # change the first emulator's predictions.
+            import copy
+            reducer = copy.deepcopy(self.parameter_reducer)
+            X_reduced = reducer.fit_transform(X)
+            self._fitted_reducer = reducer
             self.logger.statement(
                 "applied parameter_reducer: {0} features -> {1}".format(
                     X.shape[1], X_reduced.shape[1]))
@@ -497,6 +504,10 @@ class PLS(Emulator):
 
         self.pls_ = PLSRegression(n_components=self.n_components)
         self.pls_.fit(X, Y)
+
+        # Training residuals, kept in the *transformed* space the map was
+        # fitted in -- see predict_ensemble for why the space matters.
+        self.residuals_ = Y - np.asarray(self.pls_.predict(X), dtype=float)
         self.fitted = True
         self.logger.statement(
             "fitted PLS: {0} inputs x {1} outputs, n_components={2}".format(
@@ -519,12 +530,11 @@ class PLS(Emulator):
             columns=["pls_{0}".format(i) for i in range(scores.shape[1])],
         )
 
-    def predict(self, pvals: Union[pd.DataFrame, pd.Series, np.ndarray]):
-        """Predict outputs from input parameter values.
+    def _predict_transformed(self, pvals):
+        """Predict in the transformed space the PLS map was fitted in.
 
-        Returns a Series for a single-row input (matching the DSIAE/DSI
-        convention used by the PEST++ forward-run helper) and a DataFrame
-        for multi-row input.
+        Returns ``(Y_hat, index)`` *before* the output inverse-transform, which
+        is where the additive, zero-mean residual model lives.
         """
         if not self.fitted:
             raise ValueError("Emulator must be fitted before prediction")
@@ -533,9 +543,17 @@ class PLS(Emulator):
         X_t = self.transformer_pipeline.transform(df) if self.transforms is not None else df
         X_arr = X_t.loc[:, self.input_names].values.astype(float)
         X_arr = self._apply_parameter_reducer(X_arr, fit=False)
-        Y_hat = self.pls_.predict(X_arr)
+        return np.asarray(self.pls_.predict(X_arr), dtype=float), df.index
 
-        Y_df = pd.DataFrame(Y_hat, index=df.index, columns=self.output_names)
+    def predict(self, pvals: Union[pd.DataFrame, pd.Series, np.ndarray]):
+        """Predict outputs from input parameter values.
+
+        Returns a Series for a single-row input (matching the DSIAE/DSI
+        convention used by the PEST++ forward-run helper) and a DataFrame
+        for multi-row input.
+        """
+        Y_hat, index = self._predict_transformed(pvals)
+        Y_df = pd.DataFrame(Y_hat, index=index, columns=self.output_names)
         if self.transforms is not None:
             Y_df = self.transformer_pipeline.inverse(Y_df)
 
@@ -545,6 +563,89 @@ class PLS(Emulator):
             out.name = "obsval"
             return out
         return Y_df
+
+    def predict_ensemble(self, pvals, nreals: int = 100, seed=None):
+        """Predict an ensemble that carries the emulator's own error.
+
+        :meth:`predict` returns the map's point prediction and no spread at
+        all.  The spread added here is a residual bootstrap: whole rows of the
+        training residual matrix -- what the model simulated minus what the map
+        predicts from that realization's own inputs -- are resampled *with
+        replacement* and added to the prediction.
+
+        Parameters
+        ----------
+        pvals : DataFrame, Series or ndarray
+            Input values, as for :meth:`predict`.
+        nreals : int, default 100
+            Number of realizations to draw per input row.
+        seed : int or None
+            Seed for the draw. The same seed gives the same ensemble.
+
+        Returns
+        -------
+        pandas.DataFrame
+            ``nreals`` rows by ``len(output_names)`` columns for a single input
+            row, indexed by realization. For ``m`` input rows, ``m * nreals``
+            rows on a ``(input, realization)`` MultiIndex.
+
+        Notes
+        -----
+        Three properties are load-bearing:
+
+        * **Whole rows are sampled, never individual entries.** A residual row
+          is a coherent pattern -- within one well the residual series is
+          strongly autocorrelated across time, while unrelated observation
+          pairs are nearly uncorrelated. Entry-wise resampling keeps the
+          marginal variances right while destroying that structure, producing
+          month-to-month jitter no realization exhibits.
+        * **Sampling is with replacement**, so ``nreals`` may exceed the
+          training ensemble size.
+        * **The draw is zero-mean by construction**, because the map is fitted
+          with an intercept -- it adds width without moving the centre.
+
+        That last guarantee holds in the space the map was fitted in, which is
+        why the residual is added *before* the output inverse-transform rather
+        than after. Under a nonlinear output transform (log, normal-score) a
+        zero-mean perturbation in fitted space is not zero-mean in physical
+        space, so adding residuals to an already-inverse-transformed prediction
+        would bias the centre.
+
+        The assumption to be aware of: resampling observed residuals assumes
+        the map's error at the prediction point is distributed like its error
+        across the training ensemble. When the prediction point sits far from
+        the training mean, the error model is extrapolated along with the map.
+        A learned noise model (as :class:`LPFA` uses) does not make that
+        assumption; this is the cheap alternative.
+        """
+        if not self.fitted:
+            raise ValueError("Emulator must be fitted before prediction")
+        if self.residuals_ is None:
+            raise ValueError(
+                "no training residuals stored; refit the emulator")
+        nreals = int(nreals)
+        if nreals < 1:
+            raise ValueError("nreals must be >= 1, not {0}".format(nreals))
+
+        rng = np.random.default_rng(seed)
+        Y_hat, index = self._predict_transformed(pvals)
+        n_train = self.residuals_.shape[0]
+        m = Y_hat.shape[0]
+
+        # row indices, not entry indices -- this is the whole point
+        draws = rng.integers(0, n_train, size=(m, nreals))
+        ens = Y_hat[:, None, :] + self.residuals_[draws]
+
+        out = pd.DataFrame(ens.reshape(m * nreals, -1), columns=self.output_names)
+        if self.transforms is not None:
+            out = self.transformer_pipeline.inverse(out)
+        if m == 1:
+            out.index = pd.RangeIndex(nreals, name="realization")
+        else:
+            out.index = pd.MultiIndex.from_product(
+                [list(index), range(nreals)],
+                names=[index.name or "input", "realization"])
+        return out
 
     def _coerce_to_input_df(self, pvals) -> pd.DataFrame:
         """Coerce arbitrary input forms to a DataFrame restricted to ``self.input_names``.

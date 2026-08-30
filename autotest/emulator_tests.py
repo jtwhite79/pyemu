@@ -2872,6 +2872,253 @@ def test_pls_cv_no_regression_on_well_conditioned_data():
     emu2 = PLS(data=data, input_names=par_cols, output_names=obs_cols).fit()
     assert emu2.n_components == emu.n_components
 
+# ---------------------------------------------------------------------------
+# PLS predictive spread (Group B): residual bootstrap
+# ---------------------------------------------------------------------------
+
+
+def _pls_noisy_data(n_real=90, n_par=12, n_obs=6, noise=0.3, seed=7):
+    """Linear map plus known iid noise, so the residual has real width."""
+    rng = np.random.RandomState(seed)
+    pars = pd.DataFrame(rng.normal(size=(n_real, n_par)),
+                        columns=["p{0}".format(i) for i in range(n_par)])
+    W = rng.normal(size=(n_par, n_obs)) * 0.3
+    obs = pd.DataFrame(pars.values @ W + noise * rng.normal(size=(n_real, n_obs)),
+                       columns=["o{0}".format(i) for i in range(n_obs)])
+    return pd.concat([pars, obs], axis=1), list(pars.columns), list(obs.columns)
+
+
+def test_pls_residuals_zero_mean():
+    """The map is fitted with an intercept, so the residual adds width without
+    moving the centre.  Catches an implementation that recentres or rescales."""
+    from pyemu.emulators import PLS
+
+    data, pc, oc = _pls_noisy_data()
+    emu = PLS(data=data, input_names=pc, output_names=oc, n_components=4).fit()
+
+    assert emu.residuals_ is not None
+    assert emu.residuals_.shape == (len(data), len(oc))
+    assert np.allclose(emu.residuals_.mean(axis=0), 0.0, atol=1e-8), \
+        emu.residuals_.mean(axis=0)
+
+
+def test_pls_ensemble_preserves_cross_column_correlation():
+    """Whole residual rows are sampled, never individual entries.  Entry-wise
+    sampling keeps the marginal variances correct while destroying the
+    cross-observation structure, so a variance-only test passes and this one
+    does not -- which is the point of it."""
+    from pyemu.emulators import PLS
+
+    # outputs share a strong common factor, so residuals are correlated
+    rng = np.random.RandomState(3)
+    n, npar, nobs = 90, 10, 6
+    pars = pd.DataFrame(rng.normal(size=(n, npar)),
+                        columns=["p{0}".format(i) for i in range(npar)])
+    common = rng.normal(size=(n, 1))
+    obs = pd.DataFrame(pars.values @ (rng.normal(size=(npar, nobs)) * 0.2)
+                       + common * 0.9 + 0.1 * rng.normal(size=(n, nobs)),
+                       columns=["o{0}".format(i) for i in range(nobs)])
+    data = pd.concat([pars, obs], axis=1)
+    pc, oc = list(pars.columns), list(obs.columns)
+
+    emu = PLS(data=data, input_names=pc, output_names=oc, n_components=3).fit()
+    ens = emu.predict_ensemble(data.loc[[0], pc], nreals=4000, seed=0)
+
+    want = np.corrcoef(emu.residuals_, rowvar=False)
+    got = np.corrcoef(ens.values, rowvar=False)
+    assert np.allclose(got, want, atol=0.06), np.abs(got - want).max()
+
+    # and the structure is real, not an identity matrix either side
+    off = want[~np.eye(len(oc), dtype=bool)]
+    assert np.abs(off).max() > 0.3, "fixture should have correlated residuals"
+
+
+def test_pls_ensemble_samples_with_replacement():
+    """nreals may exceed the training ensemble size."""
+    from pyemu.emulators import PLS
+
+    data, pc, oc = _pls_noisy_data(n_real=40)
+    emu = PLS(data=data, input_names=pc, output_names=oc, n_components=3).fit()
+
+    nreals = 300
+    ens = emu.predict_ensemble(data.loc[[0], pc], nreals=nreals, seed=0)
+    assert ens.shape == (nreals, len(oc))
+
+    # distinct rows drawn should match the with-replacement expectation
+    n = len(data)
+    distinct = len(np.unique(ens.values.round(10), axis=0))
+    expected = n * (1.0 - (1.0 - 1.0 / n) ** nreals)
+    assert abs(distinct - expected) < 0.25 * expected, (distinct, expected)
+
+
+def test_pls_ensemble_deterministic():
+    from pyemu.emulators import PLS
+
+    data, pc, oc = _pls_noisy_data()
+    emu = PLS(data=data, input_names=pc, output_names=oc, n_components=4).fit()
+    x = data.loc[[0], pc]
+
+    a = emu.predict_ensemble(x, nreals=200, seed=0)
+    b = emu.predict_ensemble(x, nreals=200, seed=0)
+    assert np.array_equal(a.values, b.values), "same seed must be bit-identical"
+    c = emu.predict_ensemble(x, nreals=200, seed=1)
+    assert not np.allclose(a.values, c.values), "different seeds must differ"
+
+
+def test_pls_ensemble_constant_output_column():
+    """A constant output gives a zero residual column and zero spread there,
+    rather than NaN."""
+    from pyemu.emulators import PLS
+
+    data, pc, oc = _pls_noisy_data()
+    data = data.copy()
+    data.loc[:, oc[0]] = 5.0
+    emu = PLS(data=data, input_names=pc, output_names=oc, n_components=3).fit()
+
+    assert np.all(np.isfinite(emu.residuals_))
+    assert np.allclose(emu.residuals_[:, 0], 0.0), emu.residuals_[:, 0]
+
+    ens = emu.predict_ensemble(data.loc[[0], pc], nreals=100, seed=0)
+    assert np.all(np.isfinite(ens.values))
+    assert np.isclose(ens.iloc[:, 0].std(), 0.0)
+    assert np.allclose(ens.iloc[:, 0].values, 5.0)
+
+
+def test_pls_ensemble_coverage_of_held_out_truth():
+    """The only check that the spread is the right *size* rather than merely
+    present: data from a known linear map plus known noise, so the ensemble's
+    empirical coverage of held-out truth should approach nominal."""
+    from pyemu.emulators import PLS
+
+    rng = np.random.RandomState(11)
+    npar, nobs, noise = 10, 5, 0.4
+    W = rng.normal(size=(npar, nobs)) * 0.3
+
+    def make(n):
+        X = rng.normal(size=(n, npar))
+        Y = X @ W + noise * rng.normal(size=(n, nobs))
+        return (pd.DataFrame(X, columns=["p{0}".format(i) for i in range(npar)]),
+                pd.DataFrame(Y, columns=["o{0}".format(i) for i in range(nobs)]))
+
+    Xtr, Ytr = make(300)
+    data = pd.concat([Xtr, Ytr], axis=1)
+    pc, oc = list(Xtr.columns), list(Ytr.columns)
+    emu = PLS(data=data, input_names=pc, output_names=oc, n_components=npar).fit()
+
+    Xte, Yte = make(120)
+    hits = total = 0
+    for i in range(len(Xte)):
+        ens = emu.predict_ensemble(Xte.iloc[[i]], nreals=400, seed=i)
+        lo = np.percentile(ens.values, 5.0, axis=0)
+        hi = np.percentile(ens.values, 95.0, axis=0)
+        truth = Yte.iloc[i].values
+        hits += int(((truth >= lo) & (truth <= hi)).sum())
+        total += len(truth)
+    coverage = hits / total
+    assert 0.85 <= coverage <= 0.98, "90% interval covered {0:.3f}".format(coverage)
+
+
+def test_pls_ensemble_residual_added_before_inverse_transform():
+    """The zero-mean guarantee holds in the space the map was fitted in, so the
+    residual is added before the output inverse-transform.  Under a log
+    transform that shows up as a median tracking the point prediction with the
+    mean above it; adding after the inverse would recentre the median."""
+    from pyemu.emulators import PLS
+
+    rng = np.random.RandomState(0)
+    n, npar, nobs = 90, 10, 5
+    pars = pd.DataFrame(rng.normal(size=(n, npar)),
+                        columns=["p{0}".format(i) for i in range(npar)])
+    obs = pd.DataFrame(
+        np.exp(pars.values @ (rng.normal(size=(npar, nobs)) * 0.3)
+               + 0.4 * rng.normal(size=(n, nobs))),
+        columns=["o{0}".format(i) for i in range(nobs)])
+    data = pd.concat([pars, obs], axis=1)
+    pc, oc = list(pars.columns), list(obs.columns)
+
+    emu = PLS(data=data, input_names=pc, output_names=oc, n_components=4,
+              transforms=[{"type": "log10", "columns": oc}]).fit()
+
+    x = data.loc[[0], pc]
+    point = np.asarray(emu.predict(x), dtype=float)
+    ens = emu.predict_ensemble(x, nreals=4000, seed=0)
+
+    # the inverse transform was applied to the perturbed values
+    assert (ens.values > 0).all(), "log inverse should keep everything positive"
+    med = np.median(ens.values, axis=0)
+    assert np.allclose(med / point, 1.0, atol=0.1), med / point
+    assert np.all(ens.mean(axis=0).values > point), \
+        "log inverse of a symmetric residual should be right-skewed"
+
+
+def test_pls_ensemble_shapes_and_index():
+    from pyemu.emulators import PLS
+
+    data, pc, oc = _pls_noisy_data()
+    emu = PLS(data=data, input_names=pc, output_names=oc, n_components=3).fit()
+
+    one = emu.predict_ensemble(data.loc[[0], pc], nreals=25, seed=0)
+    assert one.shape == (25, len(oc))
+    assert one.index.name == "realization"
+    assert list(one.columns) == oc
+
+    many = emu.predict_ensemble(data.loc[[0, 1, 2], pc], nreals=7, seed=0)
+    assert many.shape == (3 * 7, len(oc))
+    assert many.index.names[-1] == "realization"
+    assert len(many.index.levels[0]) == 3
+
+
+def test_pls_ensemble_errors():
+    from pyemu.emulators import PLS
+
+    data, pc, oc = _pls_noisy_data()
+    unfit = PLS(data=data, input_names=pc, output_names=oc, n_components=3)
+    with pytest.raises(ValueError, match="fitted"):
+        unfit.predict_ensemble(data.loc[[0], pc])
+
+    emu = PLS(data=data, input_names=pc, output_names=oc, n_components=3).fit()
+    with pytest.raises(ValueError, match="nreals"):
+        emu.predict_ensemble(data.loc[[0], pc], nreals=0)
+
+
+def test_pls_parameter_reducer_not_aliased():
+    """_fitted_reducer must be a copy: sharing one reducer instance between two
+    emulators otherwise makes the second fit change the first's predictions."""
+    from sklearn.decomposition import PCA
+    from pyemu.emulators import PLS
+
+    data, pc, oc = _pls_noisy_data(n_real=80, n_par=12)
+    shared = PCA(n_components=5)
+
+    e1 = PLS(data=data, input_names=pc, output_names=oc, n_components=3,
+             parameter_reducer=shared).fit()
+    before = np.asarray(e1.predict(data.loc[:, pc]), dtype=float)
+
+    PLS(data=data.iloc[:40], input_names=pc, output_names=oc, n_components=3,
+        parameter_reducer=shared).fit()
+    after = np.asarray(e1.predict(data.loc[:, pc]), dtype=float)
+
+    assert e1._fitted_reducer is not shared, "reducer was aliased, not copied"
+    assert np.allclose(before, after), \
+        "fitting a second emulator changed the first's predictions"
+
+
+def test_pls_residuals_survive_pickle_round_trip(tmp_path):
+    """predict_ensemble must work after load(), so residuals_ has to persist."""
+    from pyemu.emulators import PLS
+
+    data, pc, oc = _pls_noisy_data()
+    emu = PLS(data=data, input_names=pc, output_names=oc, n_components=3).fit()
+    f = os.path.join(str(tmp_path), "emu.pkl")
+    emu.save(f)
+
+    loaded = PLS.load(f)
+    assert loaded.residuals_ is not None
+    assert np.allclose(loaded.residuals_, emu.residuals_)
+    x = data.loc[[0], pc]
+    assert np.allclose(loaded.predict_ensemble(x, nreals=50, seed=0).values,
+                       emu.predict_ensemble(x, nreals=50, seed=0).values)
+
 if __name__ == "__main__":
     tmp_path = Path("temp")
     test_gpr_basic(tmp_path=tmp_path)
