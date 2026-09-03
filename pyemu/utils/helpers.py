@@ -1885,7 +1885,10 @@ def pst_from_io_files(
         assert os.path.exists(ins_file), "instruction file not found: " + str(ins_file)
         obs_names.extend(pyemu.pst_utils.parse_ins_file(ins_file))
 
-    new_pst = pyemu.pst_utils.generic_pst(list(par_names), list(obs_names))
+    # par_names is a set, so sort it - set iteration order is not stable
+    # across runs and would give the control file a different parameter
+    # order every time.  obs_names is already a list in instruction file order.
+    new_pst = pyemu.pst_utils.generic_pst(sorted(par_names), list(obs_names))
 
     if "window" in platform.platform().lower() and pst_path == ".":
         pst_path = ""

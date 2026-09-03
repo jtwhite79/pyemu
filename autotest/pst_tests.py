@@ -1909,6 +1909,109 @@ def version2_ext_filename_no_ext_pstfrom_test(tmp_path):
     assert obs.shape[0] == 3, obs
 
 
+def pst_from_io_files_par_order_test(tmp_path):
+    """par_names are collected in a set to remove duplicates.  Set iteration order
+    is not stable between runs, so they have to be sorted on the way back out -
+    otherwise the same template files give a different parameter order each time."""
+    import os
+    import subprocess
+    import sys
+    import pyemu
+
+    # deliberately not in alphabetical order, and one name repeated across files
+    names_a = ["kz", "por", "aa_rch", "mmm", "b1"]
+    names_b = ["zzz", "aa_rch", "cc"]
+    all_names = sorted(set(names_a + names_b))
+
+    tpl_files, in_files = [], []
+    for i, names in enumerate([names_a, names_b]):
+        tpl_file = os.path.join(tmp_path, "f{0}.tpl".format(i))
+        with open(tpl_file, "w") as f:
+            f.write("ptf ~\n")
+            for name in names:
+                f.write("~  {0}  ~\n".format(name))
+        tpl_files.append(tpl_file)
+        in_files.append(os.path.join(tmp_path, "f{0}.in".format(i)))
+
+    ins_file = os.path.join(tmp_path, "o.ins")
+    with open(ins_file, "w") as f:
+        f.write("pif ~\n")
+        for name in ["obs3", "obs1", "obs2"]:
+            f.write("l1 !{0}!\n".format(name))
+    out_file = os.path.join(tmp_path, "o.out")
+    with open(out_file, "w") as f:
+        for _ in range(3):
+            f.write("1.0\n")
+
+    pst = pyemu.helpers.pst_from_io_files(tpl_files, in_files,
+                                          [ins_file], [out_file])
+
+    assert list(pst.parameter_data.parnme) == all_names, list(pst.parameter_data.parnme)
+    # the dedup still has to work
+    assert len(pst.par_names) == len(all_names)
+
+    # obs come back sorted as well, which is also reproducible
+    assert list(pst.observation_data.obsnme) == ["obs1", "obs2", "obs3"]
+
+    # and it must be stable across processes, where string hashing differs
+    script = os.path.join(tmp_path, "order.py")
+    with open(script, "w") as f:
+        f.write("import pyemu\n")
+        f.write("pst = pyemu.helpers.pst_from_io_files(\n")
+        f.write("    {0}, {1}, {2}, {3})\n".format(tpl_files, in_files,
+                                                    [ins_file], [out_file]))
+        f.write("print(','.join(pst.parameter_data.parnme))\n")
+
+    seen = set()
+    for seed in ("0", "1", "12345"):
+        env = dict(os.environ)
+        env["PYTHONHASHSEED"] = seed
+        out = subprocess.run([sys.executable, script], capture_output=True,
+                             text=True, env=env, cwd=str(tmp_path))
+        assert out.returncode == 0, out.stderr[-2000:]
+        seen.add(out.stdout.strip().splitlines()[-1])
+
+    assert len(seen) == 1, "parameter order changed with PYTHONHASHSEED: {0}".format(seen)
+    assert seen.pop() == ",".join(all_names)
+
+def add_parameters_par_order_test(tmp_path):
+    """Pst.add_parameters goes through parse_tpl_file, which collects names in a
+    set, so the order it appends them in has to be sorted too."""
+    import os
+    import pyemu
+
+    pst = pyemu.Pst(os.path.join("pst", "pest.pst"))
+    existing = list(pst.parameter_data.parnme)
+
+    new_names = ["zz_new", "aa_new", "mm_new", "b_new"]
+    tpl_file = os.path.join(tmp_path, "extra.dat.tpl")
+    with open(tpl_file, "w") as f:
+        f.write("ptf ~\n")
+        for name in new_names:
+            f.write("~  {0}  ~\n".format(name))
+
+    added = pst.add_parameters(tpl_file, pst_path=".")
+
+    assert list(added.parnme) == sorted(new_names), list(added.parnme)
+    # the new ones land after the existing ones, in sorted order
+    assert list(pst.parameter_data.parnme) == existing + sorted(new_names)
+
+
+def parse_tpl_file_sorted_test(tmp_path):
+    """parse_tpl_file is the source of the ordering - it dedups with a set."""
+    import os
+    import pyemu
+
+    names = ["kz", "por", "aa_rch", "mmm", "b1", "por"]   # note the duplicate
+    tpl_file = os.path.join(tmp_path, "s.tpl")
+    with open(tpl_file, "w") as f:
+        f.write("ptf ~\n")
+        for name in names:
+            f.write("~  {0}  ~\n".format(name))
+
+    parsed = pyemu.pst_utils.parse_tpl_file(tpl_file)
+    assert parsed == sorted(set(names)), parsed
+
 if __name__ == "__main__":
     """
     Tests may need modifying to support passing a tmp_path argument
