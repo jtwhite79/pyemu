@@ -2042,6 +2042,9 @@ def _process_array_file(model_file, df):
     with open(org_file[0], 'r') as fp:
          header = [fp.readline() for _ in range(skip)]
     org_arr = np.loadtxt(org_file[0], ndmin=2, skiprows=skip)
+    # remember the original layout so the model file is written back the
+    # same way, even if org_arr gets reshaped to match a mlt array below
+    org_shape = org_arr.shape
 
     if "mlt_file" in df_mf.columns:
         for mlt, operator in zip(df_mf.mlt_file, df_mf.operator):
@@ -2073,16 +2076,21 @@ def _process_array_file(model_file, df):
                         operator, mlt
                     )
                 )
-        # load zone array if available to mask bounds clipping
+        # load zone array if available to mask bounds clipping.
+        # zone and bound arrays are reshaped to match org_arr because, for
+        # 1-D (e.g. vertex) grids, they may be stored as a column while
+        # org_arr was reshaped above to match a row-shaped mlt array
         zone_arr = None
         if "zone_file" in df.columns:
             zone_files = df_mf.zone_file.dropna().unique()
             if len(zone_files) == 1:
                 zone_arr = np.loadtxt(zone_files[0], ndmin=2)
+                zone_arr = zone_arr.reshape(org_arr.shape)
             elif len(zone_files) > 1:
                 zone_arr = np.zeros_like(org_arr)
                 for zf in zone_files:
                     za = np.loadtxt(zf, ndmin=2)
+                    za = za.reshape(org_arr.shape)
                     zone_arr[za != 0] = 1
 
         # apply upper bound - array file takes precedence over scalar
@@ -2091,6 +2099,7 @@ def _process_array_file(model_file, df):
             if len(ub_files) > 1:
                 raise Exception("different upper_bound_files for {0}".format(org_file))
             ub_arr = np.loadtxt(ub_files[0], ndmin=2)
+            ub_arr = ub_arr.reshape(org_arr.shape)
             if zone_arr is not None:
                 mask = (org_arr > ub_arr) & (zone_arr != 0)
             else:
@@ -2117,6 +2126,7 @@ def _process_array_file(model_file, df):
             if len(lb_files) > 1:
                 raise Exception("different lower_bound_files for {0}".format(org_file))
             lb_arr = np.loadtxt(lb_files[0], ndmin=2)
+            lb_arr = lb_arr.reshape(org_arr.shape)
             if zone_arr is not None:
                 mask = (org_arr < lb_arr) & (zone_arr != 0)
             else:
@@ -2146,6 +2156,7 @@ def _process_array_file(model_file, df):
         sep = df_mf.sep.fillna(' ').iloc[0]
     except AttributeError:
         sep = ' '
+    org_arr = org_arr.reshape(org_shape)
     with open(model_file, 'w') as fp:
         fp.writelines(header)
         np.savetxt(fp, np.atleast_2d(org_arr), fmt=fmt, delimiter=sep)

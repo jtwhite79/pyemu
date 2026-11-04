@@ -4940,6 +4940,105 @@ def test_vertex_grid_ppu(tmp_path):
     assert np.isclose(pstchk.phi, 0), f"expected near-zero phi: {pstchk.phi}"
 
 
+def test_vertex_grid_hyperpars_ppdf(tmp_path):
+    """DISV (quadtree) grid + pilot points with ``prep_hyperpars=True``,
+    where the pilot point locations are passed as a dataframe via ``pp_space``.
+    """
+    try:
+        import pypestutils  # noqa: F401
+    except ImportError:
+        import pytest
+        pytest.skip("pypestutils not available")
+
+    pf, sim = setup_freyberg_mf6(tmp_path, "freyberg_quadtree")
+    m = sim.get_model()
+    mg = m.modelgrid
+    assert mg.grid_type == "vertex"
+    template_ws = pf.new_d
+
+    v = pyemu.geostats.ExpVario(contribution=1.0, a=1000, anisotropy=1.0, bearing=0.0)
+    gs = pyemu.geostats.GeoStruct(variograms=v, transform="log")
+
+    # tidy the layer 1 hk array file (one value per line) and rerun mf6
+    arr_file = "project.npf_k_layer1.txt"
+    arr_path = os.path.join(template_ws, arr_file)
+    with open(arr_path, "r") as fh:
+        values = [float(x) for x in fh.read().split()]
+    np.savetxt(arr_path, values)
+    pyemu.os_utils.run(mf6_exe_path, cwd=template_ws)
+
+    # layer 1 idomain is a 1-D array of length ncpl
+    ib = m.dis.idomain.get_data()[0]
+    ncpl = ib.shape[0]
+
+    # pilot point locations: every 20th active cell center
+    active_cells = np.where(ib > 0)[0]
+    pp_cells = active_cells[::20]
+    pp_df = pd.DataFrame({
+        "name": ["pp_{0}".format(i) for i in range(len(pp_cells))],
+        "x": mg.xcellcenters[pp_cells],
+        "y": mg.ycellcenters[pp_cells],
+        "zone": ib[pp_cells],
+        "parval1": 1.0,
+    })
+
+    tag = "npfklayer1pp"
+    par_df = pf.add_parameters(arr_file,
+                               zone_array=ib,
+                               par_type="pilotpoints",
+                               geostruct=gs,
+                               par_name_base=tag,
+                               pargp=tag,
+                               lower_bound=0.2, upper_bound=5.0,
+                               pp_options={"try_use_ppu": True,
+                                           "prep_hyperpars": True,
+                                           "pp_space": pp_df})
+    assert len(par_df) == len(pp_df), (len(par_df), len(pp_df))
+
+    # hyperpar arrays should be written with one value per vertex-grid cell
+    for suffix in ["corrlen", "bearing", "aniso", "zone"]:
+        hyper_file = os.path.join(template_ws, "{0}.{1}.dat".format(tag, suffix))
+        assert os.path.exists(hyper_file), hyper_file
+        hyper_arr = np.loadtxt(hyper_file)
+        assert hyper_arr.size == ncpl, (suffix, hyper_arr.shape, ncpl)
+
+    pf.add_observations(arr_file, prefix="hkin", obsgp="hkin")
+    pf.mod_sys_cmds.append(mf6_exe_path)
+    pst = pf.build_pst()
+
+    # the hyperpar apply function should be registered as a pre-apply function
+    mult_info = pd.read_csv(os.path.join(template_ws, "mult2model_info.csv"))
+    pre_apply_calls = mult_info["pre_apply_function"].dropna().tolist()
+    assert len(pre_apply_calls) == 1, pre_apply_calls
+    assert "apply_ppu_hyperpars" in pre_apply_calls[0], pre_apply_calls
+
+    # all pilot point values = 1.0, so the model input array should be unchanged
+    check_apply(pf)
+    arr = np.loadtxt(arr_path)
+    arr_org = np.loadtxt(os.path.join(template_ws, "org", arr_file))
+    assert arr.shape == arr_org.shape, (arr.shape, arr_org.shape)
+    assert np.allclose(arr, arr_org)
+
+    # pilot point values = 2.0, so the model input array should double
+    # in active cells and be unchanged in inactive (zone 0) cells
+    par = pst.parameter_data
+    pp_pars = par.loc[par.pargp == tag, "parnme"]
+    par.loc[pp_pars, "parval1"] = 2.0
+    check_apply(pf)
+    arr = np.loadtxt(arr_path)
+    active = ib > 0
+    assert np.allclose(arr[active], arr_org[active] * 2.0)
+    assert np.allclose(arr[~active], arr_org[~active])
+
+    # reset and run once through pestpp
+    par.loc[pp_pars, "parval1"] = 1.0
+    pst.control_data.noptmax = 0
+    pst.write(os.path.join(template_ws, "test.pst"))
+    os_utils.run("{0} test.pst".format(pp_exe_path), cwd=template_ws)
+    pstchk = pyemu.Pst(os.path.join(template_ws, "test.pst"))
+    assert np.isclose(pstchk.phi, 0), f"expected near-zero phi: {pstchk.phi}"
+
+
 #def mf6_freyberg_thresh_invest(setup_freyberg_mf6):
 def mf6_freyberg_thresh_test(tmp_path):
 
