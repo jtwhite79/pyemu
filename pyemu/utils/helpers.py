@@ -1950,13 +1950,25 @@ class PstFromFlopyModel(object):
         raise DeprecationWarning(dep_warn)
 
 
-def apply_list_and_array_pars(arr_par_file="mult2model_info.csv", chunk_len=50):
+def apply_list_and_array_pars(arr_par_file="mult2model_info.csv", chunk_len=50,
+                              appl_exe=None, appl_threads=None):
     """Apply multiplier parameters to list and array style model files
 
     Args:
         arr_par_file (str):
         chunk_len (`int`): the number of files to process per multiprocessing
             chunk in apply_array_pars().  default is 50.
+        appl_exe (`str` or `bool`): if not None, the list and array files are
+            processed by the compiled PEST++ program `pestpp-appl` instead of
+            the python functions.  Pass the name of (or path to) the program,
+            or `True` to use "pestpp-appl".  Any `pre_apply_function` /
+            `post_apply_function` entries are still run here in python, and
+            pilot point multiplier arrays that rely on binary factor files
+            (pypestutils) are still made here in python.  Default is None
+            (use the python functions).
+        appl_threads (`int`): number of threads for `pestpp-appl` to use.
+            Default is None (the program uses all cores).  Only used if
+            `appl_exe` is not None.
 
     Returns:
 
@@ -2001,15 +2013,97 @@ def apply_list_and_array_pars(arr_par_file="mult2model_info.csv", chunk_len=50):
                 print("...evaluating pre-apply function '{0}'".format(call))
                 eval(call)
 
-        # TODO check use_cols is always present
-        apply_genericlist_pars(list_pars, chunk_len=chunk_len)
-        apply_array_pars(arr_pars, chunk_len=chunk_len)
+        if appl_exe is None or appl_exe is False:
+            # TODO check use_cols is always present
+            apply_genericlist_pars(list_pars, chunk_len=chunk_len)
+            apply_array_pars(arr_pars, chunk_len=chunk_len)
+        else:
+            _apply_with_exe(arr_par_file, apply_value, arr_pars, chunk_len,
+                            appl_exe, appl_threads)
 
         if "post_apply_function" in ddf.columns:
             calls = ddf.post_apply_function.dropna()
             for call in calls:
                 print("...evaluating post-apply function '{0}'".format(call))
                 eval(call)
+
+
+def _is_text_file(filename, nbytes=4096):
+    """True if the start of the file has no null bytes"""
+    with open(filename, "rb") as f:
+        return b"\0" not in f.read(nbytes)
+
+
+def _apply_with_exe(arr_par_file, apply_value, arr_pars, chunk_len, appl_exe,
+                    appl_threads=None):
+    """process the list and array files of one `apply_order` value with the
+    compiled program `pestpp-appl`.  Used by `apply_list_and_array_pars()`."""
+    import shutil
+    import subprocess
+
+    exe = "pestpp-appl" if appl_exe is True else str(appl_exe)
+    if os.path.exists(exe):
+        exe = os.path.abspath(exe)
+    elif shutil.which(exe) is None:
+        raise Exception("pestpp-appl program '{0}' not found".format(exe))
+    cmd = [exe, arr_par_file, "--apply_order", repr(float(apply_value))]
+    if appl_threads is not None:
+        cmd.extend(["--threads", str(int(appl_threads))])
+    # the program makes pilot point multiplier arrays from text factor files.
+    # binary factor files (pypestutils) have to be dealt with here
+    if "pp_file" in arr_pars.columns and arr_pars.pp_file.notna().any():
+        fac_files = arr_pars.loc[arr_pars.pp_file.notna(), "fac_file"].dropna().unique()
+        if not all([_is_text_file(f) for f in fac_files]):
+            _apply_fac2real(arr_pars, chunk_len)
+            cmd.append("--skip_pilot_points")
+    print("starting pestpp-appl", datetime.now())
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    print(result.stdout, end="")
+    if result.returncode != 0:
+        raise Exception(
+            "pestpp-appl failed for apply_order {0}:\n{1}".format(
+                apply_value, result.stderr
+            )
+        )
+    print("finished pestpp-appl", datetime.now())
+
+
+def _apply_fac2real(df, chunk_len=50):
+    """make the pilot point multiplier arrays (rows of `df` with a `pp_file`
+    entry) with `pyemu.geostats.fac2real`.  Used by `apply_array_pars()`."""
+    if "pp_file" in df.columns:
+        sel = df.pp_file.notna()
+        if not sel.empty:
+            print("starting fac2real", datetime.now())
+            pp_cols = [c for c in ['pp_file', 'fac_file', 'mlt_file', 'pp_fill_value', 'pp_lower_limit', 'pp_upper_limit', 'pp_mpts', 'pp_transform', 'shape'] if c in df.columns]
+            pp_df = df.loc[sel, pp_cols].rename(
+                columns={
+                    "fac_file": "factors_file",
+                    "mlt_file": "out_file",
+                    "pp_fill_value": "fill_value",
+                    "pp_lower_limit": "lower_lim",
+                    "pp_upper_limit": "upper_lim",
+                    "pp_mpts" : "mpts",
+                    "pp_transform" : "transform"
+                }
+            )
+            # don't need to process all (e.g. if const. mults apply across kper...)
+            pp_args = pp_df.drop_duplicates().to_dict("records")
+            chunks = _chunk_list(pp_args, chunk_len)
+            print("number of chunks to process:", len(chunks))
+            if len(chunks) == 1:
+                _process_chunk_fac2real(chunks[0], 0)
+            else:
+                with mp.get_context("spawn").Pool(
+                        processes=min(mp.cpu_count(), 60)) as pool:
+                    x = [
+                        pool.apply_async(_process_chunk_fac2real, args=(chunk, i))
+                        for i, chunk in enumerate(chunks)
+                    ]
+                    [xx.get() for xx in x]
+                    pool.close()
+                    pool.join()
+            print("finished fac2real", datetime.now())
 
 
 def _process_chunk_fac2real(chunk, i):
@@ -2215,51 +2309,7 @@ def apply_array_pars(arr_par="arr_pars.csv", arr_par_file=None, chunk_len=50):
     #     except:
     #         print("error removing mult array:{0}".format(fname))
 
-    if "pp_file" in df.columns:
-        sel = df.pp_file.notna()
-        if not sel.empty:
-            print("starting fac2real", datetime.now())
-            pp_df = df.loc[
-                sel,
-                [
-                    "pp_file",
-                    "fac_file",
-                    "mlt_file",
-                    "pp_fill_value",
-                    "pp_lower_limit",
-                    "pp_upper_limit",
-                    "pp_mpts",
-                    "pp_transform",
-                    "shape"
-                ],
-            ].rename(
-                columns={
-                    "fac_file": "factors_file",
-                    "mlt_file": "out_file",
-                    "pp_fill_value": "fill_value",
-                    "pp_lower_limit": "lower_lim",
-                    "pp_upper_limit": "upper_lim",
-                    "pp_mpts" : "mpts",
-                    "pp_transform" : "transform"
-                }
-            )
-            # don't need to process all (e.g. if const. mults apply across kper...)
-            pp_args = pp_df.drop_duplicates().to_dict("records")
-            chunks = _chunk_list(pp_args, chunk_len)
-            print("number of chunks to process:", len(chunks))
-            if len(chunks) == 1:
-                _process_chunk_fac2real(chunks[0], 0)
-            else:
-                with mp.get_context("spawn").Pool(
-                        processes=min(mp.cpu_count(), 60)) as pool:
-                    x = [
-                        pool.apply_async(_process_chunk_fac2real, args=(chunk, i))
-                        for i, chunk in enumerate(chunks)
-                    ]
-                    [xx.get() for xx in x]
-                    pool.close()
-                    pool.join()
-            print("finished fac2real", datetime.now())
+    _apply_fac2real(df, chunk_len)
 
     print("starting arr mlt", datetime.now())
     # unique model input files to be produced, split into chunks of files

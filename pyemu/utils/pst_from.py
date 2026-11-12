@@ -201,6 +201,11 @@ class PstFrom(object):
             On windows, beware setting this much smaller than 50 because of
             the overhead associated with spawning the pool.  This value is
             added to the call to `apply_list_and_array_pars`. Default is 50
+        appl_exe (`str` or `bool`): if not None, the generated forward run script
+            uses the compiled PEST++ program `pestpp-appl` to process the list and
+            array files instead of the python functions.  Pass the name of (or path
+            to) the program, or `True` to use "pestpp-appl".  This value is added to
+            the call to `apply_list_and_array_pars`.  Default is None.
         echo (`bool`): flag to echo logger messages to the screen.  Default is
             True
         pp_solve_num_threads (`int`): number of threads to use for the pyemu
@@ -233,7 +238,8 @@ class PstFrom(object):
         tpl_subfolder=None,
         chunk_len=50,
         echo=True,
-        pp_solve_num_threads=10
+        pp_solve_num_threads=10,
+        appl_exe=None,
     ):
         self.original_d = Path(original_d)
         self.new_d = Path(new_d)
@@ -302,16 +308,21 @@ class PstFrom(object):
         self.ult_ubound_fill = 1.0e30
         self.ult_lbound_fill = -1.0e30
         self.chunk_len = int(chunk_len)
+        self.appl_exe = appl_exe
         self.py_functions = set()
 
-        self.pre_py_cmds.insert(
-            0,
-            "pyemu.helpers.apply_list_and_array_pars("
-            "arr_par_file='mult2model_info.csv',chunk_len={0})".format(
-                self.chunk_len
-            ),
-        )
+        self.pre_py_cmds.insert(0, self._apply_cmd())
 
+
+    def _apply_cmd(self):
+        """the forward run script line that applies the parameters to the model files"""
+        cmd = (
+            "pyemu.helpers.apply_list_and_array_pars("
+            "arr_par_file='mult2model_info.csv',chunk_len={0}".format(self.chunk_len)
+        )
+        if self.appl_exe is not None and self.appl_exe is not False:
+            cmd += ",appl_exe={0!r}".format(self.appl_exe)
+        return cmd + ")"
 
     @property
     def parfile_relations(self):
@@ -805,13 +816,7 @@ class PstFrom(object):
                 if not any(
                     ["apply_list_and_array_pars" in s for s in self.pre_py_cmds]
                 ):
-                    self.pre_py_cmds.insert(
-                        0,
-                        "pyemu.helpers.apply_list_and_array_pars("
-                        "arr_par_file='mult2model_info.csv',chunk_len={0})".format(
-                            self.chunk_len
-                        ),
-                    )
+                    self.pre_py_cmds.insert(0, self._apply_cmd())
             else:
                 par_data = pyemu.pst_utils._populate_dataframe(
                     [], pst.par_fieldnames, pst.par_defaults, pst.par_dtype
